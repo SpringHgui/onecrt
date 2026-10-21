@@ -59,7 +59,7 @@ pub(crate) struct ShellHandler;
 impl client::Handler for ShellHandler {
     type Error = russh::Error;
 
-    // 内网运维工具：自动接受主机密钥，不做首次指纹确认（SecureCRT 是会弹框的，这里刻意省略）
+    // 内网运维工具：自动接受主机密钥，不做首次指纹确认（刻意省略弹框）
     async fn check_server_key(&mut self, _key: &russh::keys::PublicKey) -> Result<bool, Self::Error> {
         Ok(true)
     }

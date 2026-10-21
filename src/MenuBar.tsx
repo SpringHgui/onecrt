@@ -144,7 +144,7 @@ export function AboutDialog({ version, onClose }: { version: string; onClose(): 
             <b>ShellX</b> {version}
           </div>
           <div className="hint">
-            跨平台 SSH 客户端：Tauri 2 + Rust（russh）+ React + xterm.js，界面参照 SecureCRT。
+            跨平台 SSH 客户端：Tauri 2 + Rust（russh）+ React + xterm.js。
           </div>
           <div className="hint">会话与命令保存在 %APPDATA%\shellx\，口令明文存储，仅面向内网运维。</div>
         </div>

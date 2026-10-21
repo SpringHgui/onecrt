@@ -23,7 +23,7 @@ export interface ToolbarActions {
   copy(): void;
   paste(): void;
   sessionOptions(): void;
-  /** 开合右侧文件面板（SFTP），仿 SecureCRT 的 Launch SecureFX */
+  /** 开合右侧文件面板（SFTP） */
   fileTransfer(): void;
   filePanelOpen: boolean;
   tabCount: number;

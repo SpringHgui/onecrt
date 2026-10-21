@@ -11,7 +11,7 @@ export interface MenuItem {
   checked?: boolean;
   /// 只有箭头、暂时没有内容的占位子菜单
   hasSubmenu?: boolean;
-  /// 子菜单内容；只支持一层，正好是 SecureCRT "Send Command to" 的形态
+  /// 子菜单内容；只支持一层，对应 "Send Command to" 的形态
   items?: MenuItem[];
   onClick?(): void;
 }

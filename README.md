@@ -1,6 +1,6 @@
 # ShellX
 
-跨平台 SSH 客户端，Tauri 2 + Rust（russh）+ React + xterm.js。界面参照 SecureCRT 的 Session Manager / Quick Connect / Command Manager 布局。
+跨平台 SSH 客户端，Tauri 2 + Rust（russh）+ React + xterm.js。界面采用 Session Manager / Quick Connect / Command Manager 布局。
 
 ## 功能
 
@@ -10,7 +10,7 @@
 - **终端标签页**：xterm.js 渲染，真实 SSH PTY，支持自适应尺寸、粘贴、多会话并行，标签上显示连接状态。
 - **标签页右键菜单**：Rename / Reset Name、Reconnect / Disconnect、Close (Ctrl+F4) / Close Disconnected Tabs / Close Other Tabs / Close Tabs to the Right / Close All Tabs、Clone Session、Session Options...。Rename 只改标签显示名，Reset Name 回到会话名；改会话本身用 Session Options。Clone Session 用同一份连接参数另开一个标签页，快速连接型标签（无对应会话节点）的 Session Options 置灰。
 - **Command Manager**：与 Session Manager 共用左侧停靠区，底部两个标签切换。同样是文件夹 + 命令树，支持过滤、新建命令 / 新建文件夹、剪切 / 复制 / 粘贴、删除、重命名、展开 / 折叠全部、属性；双击命令或点工具栏箭头发送到当前终端；右键 "Send Command to" 按作用域发送：All Sessions 广播给所有就绪标签页，Visible Sessions 只发给当前可见的那个。命令的显示名与实际发送文本分开存储，允许多行。
-- **工具栏**：菜单栏下方一行，按 SecureCRT 的图标顺序排列：新建会话、快速连接（用活动标签的连接参数打开 Quick Connect，没有活动标签时是空白新建）、切换下一个标签、重新连接 | 复制、粘贴、打印 | 会话选项、键盘映射、端口转发。有活动标签时才可用；打印 / 键盘映射 / 端口转发为置灰占位。视图菜单的"工具栏"控制这一行。
+- **工具栏**：菜单栏下方一行，依次为：新建会话、快速连接（用活动标签的连接参数打开 Quick Connect，没有活动标签时是空白新建）、切换下一个标签、重新连接 | 复制、粘贴、打印 | 会话选项、键盘映射、端口转发。有活动标签时才可用；打印 / 键盘映射 / 端口转发为置灰占位。视图菜单的"工具栏"控制这一行。
 - **认证**：密码、公钥（OpenSSH 私钥，支持 `~` 展开）、键盘交互；失败时回传具体原因。
 
 ## 开发
@@ -52,8 +52,8 @@ cd src-tauri && cargo test
 - 首次连接自动接受服务器主机密钥，不做指纹确认。
 - 协议下拉列出了 SSH2 / SSH1 / Telnet / Telnet/TLS / Local Shell / RDP / Serial / TAPI / Rlogin / Raw，但只有 **SSH2** 已实现，其余置灰不可选。
 - Firewall 选项固定为 None；"Show quick connect on startup" 与 "Open in a tab" 两个勾选框当前仅为界面还原，不改变行为。
-- 右键菜单按 SecureCRT 原样列全，其中 Connect in New Window / New Tab Group / File Transfer / Both、Find Next、Create Desktop Shortcut、Arrange Tree、Show Descriptions、Show Transfer Sessions、Open Sessions in a Tab/Tile、文件夹 Properties 均为置灰占位，尚未实现。命令树的右键菜单已实现，其中 "Send Command to" 的 Selected Tab Group(s) 置灰占位（还没有标签组），命令文件夹本身也不能整组批量发送。
+- 右键菜单列全条目，其中 Connect in New Window / New Tab Group / File Transfer / Both、Find Next、Create Desktop Shortcut、Arrange Tree、Show Descriptions、Show Transfer Sessions、Open Sessions in a Tab/Tile、文件夹 Properties 均为置灰占位，尚未实现。命令树的右键菜单已实现，其中 "Send Command to" 的 Selected Tab Group(s) 置灰占位（还没有标签组），命令文件夹本身也不能整组批量发送。
 - 菜单右侧的快捷键（Ctrl+Alt+T 等）当前只作对照显示，未绑定全局按键；菜单内可用 ↑ ↓ Enter Esc 操作，→ 打开子菜单、← 关闭。
-- 标签页右键菜单同样按 SecureCRT 列全，其中 Close Tab Group / Lock Session... / Clone in New Window / Send to New Window / Send to New Tab Group / Connect SFTP Session / Open SecureFX / Save Session... / Send Commands to This Group 为置灰占位：它们分别依赖标签组、多窗口与 SFTP，这三样都还没实现。
-- 命令树面板没有还原 SecureCRT 标题栏右侧的置顶 / 关闭两个小图标，停靠区改由底部的 Session Manager / Command Manager 标签切换。
+- 标签页右键菜单同样列全条目，其中 Close Tab Group / Lock Session... / Clone in New Window / Send to New Window / Send to New Tab Group / Connect SFTP Session / Open SecureFX / Save Session... / Send Commands to This Group 为置灰占位：它们分别依赖标签组、多窗口与 SFTP，这三样都还没实现。
+- 命令树面板没有还原标题栏右侧的置顶 / 关闭两个小图标，停靠区改由底部的 Session Manager / Command Manager 标签切换。
 - 主题只覆盖界面配色：`tauri.conf.json` 里窗口的 `theme: "Dark"` 是写死的，明亮主题下启动瞬间标题栏仍偏暗，要等前端 `setTheme` 生效才纠正（`backgroundColor` 已与深色 `--bg` 对齐为 `#222426`，深色主题不再有底色跳变）。终端 ANSI 只接了红/黄/绿三档（`--ansi-*`，报错与断连提示走的就是这三档），其余 13 色仍用 xterm 默认调色板。
