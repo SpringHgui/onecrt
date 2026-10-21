@@ -498,7 +498,7 @@ export default function App() {
       return;
     }
     const s = node as SshSession;
-    // 后端没有交互式认证，口令/密钥全空的会话先弹框补凭据再连（SecureCRT 同款时序）
+    // 后端没有交互式认证，口令/密钥全空的会话先弹框补凭据再连
     if (!s.password && !s.keyPath?.trim()) {
       setPwdPrompt({ session: s });
       return;
