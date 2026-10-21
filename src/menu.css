@@ -1,0 +1,207 @@
+/* 菜单栏 / 工具栏 / 状态栏 / 外壳布局。
+   与 styles.css 分开写，色值全部走 :root 与 [data-theme] 的 token。 */
+
+.shell {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+}
+
+.shell > .app {
+  /* .app 自带 height:100%，在这里会让总高超出一屏、状态栏被顶出去 */
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto;
+}
+
+/* 视图菜单里关掉某个面板：侧栏/工具条/标签栏用 display:none，
+   不重新排 JSX，改动面最小；!important 是因为 menu.css 与 styles.css 的先后顺序不定 */
+.off {
+  display: none !important;
+}
+
+/* ---------- 标题栏 ---------- */
+.titlebar {
+  display: flex;
+  align-items: stretch;
+  flex: none;
+  height: 36px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+}
+
+.tb-title {
+  flex: 1 1 auto;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  color: var(--text-2);
+  font-size: 12.5px;
+}
+
+.tb-caption {
+  display: flex;
+  flex: none;
+}
+
+/* 仿原生 Win11  caption button：命中格 46 宽、贴右边缘，指针是箭头而不是手型 */
+.tb-btn {
+  flex: none;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  border: 0;
+  margin: 0;
+  padding: 0;
+  background: none;
+  color: var(--text-2);
+  cursor: default;
+}
+
+/* 高亮是格内悬空一块圆角矩形，不是整格填色 */
+.tb-btn .tb-glyph {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 40px;
+  height: 30px;
+  border-radius: 4px;
+}
+
+.tb-btn:hover .tb-glyph {
+  background: var(--bg-hover);
+  color: var(--text);
+}
+
+.tb-btn:active .tb-glyph {
+  background: var(--bg-active);
+}
+
+.tb-btn.close:hover .tb-glyph {
+  background: #c42b1c;
+  color: #fff;
+}
+
+.tb-btn.close:active .tb-glyph {
+  background: #b8291b;
+}
+
+/* ---------- 菜单栏（嵌在标题栏左侧） ---------- */
+.menubar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+  padding: 0 4px 0 8px;
+  font-size: 12.5px;
+}
+
+.menubar-title {
+  padding: 4px 10px;
+  border-radius: var(--radius);
+  color: var(--text);
+  cursor: default;
+}
+
+.menubar-title:hover {
+  background: var(--bg-hover);
+}
+
+.menubar-title.open {
+  background: var(--bg-selected);
+}
+
+/* ---------- 工具栏 ---------- */
+.toolbar {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+  flex: none;
+  height: 34px;
+  padding: 0 6px;
+  background: var(--bg);
+  border-bottom: 1px solid var(--line);
+}
+
+.toolbar button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 30px;
+  height: 26px;
+  border: 0;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.toolbar button:hover:not(:disabled) {
+  background: var(--bg-selected);
+  color: var(--text);
+}
+
+.toolbar button:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+/* 开关型按钮（文件面板）按下态 */
+.toolbar button.on:not(:disabled) {
+  background: var(--bg-selected);
+  color: var(--accent);
+}
+
+.toolbar .tb-sep {
+  width: 1px;
+  height: 18px;
+  margin: 0 5px;
+  background: var(--line);
+}
+
+/* ---------- 状态栏 ---------- */
+.statusbar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex: none;
+  height: 24px;
+  padding: 0 10px;
+  background: var(--bg);
+  border-top: 1px solid var(--line);
+  color: var(--text-2);
+  font-size: 11.5px;
+  white-space: nowrap;
+  overflow: hidden;
+}
+
+.statusbar .sb-name {
+  color: var(--text);
+}
+
+.statusbar .sb-fill {
+  flex: 1;
+}
+
+.statusbar .sb-sep {
+  width: 1px;
+  height: 11px;
+  background: var(--border);
+}
+
+/* ---------- 关于 ---------- */
+.dialog-sm {
+  width: 380px;
+}
+
+.about-line {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  font-size: 14px;
+}

@@ -12,9 +12,14 @@
   "app": {
     "windows": [
       {
-        "title": "shellx",
-        "width": 800,
-        "height": 600
+        "title": "ShellX",
+        "width": 1280,
+        "height": 820,
+        "minWidth": 900,
+        "minHeight": 560,
+        "decorations": false,
+        "theme": "Dark",
+        "backgroundColor": "#222426"
       }
     ],
     "security": {

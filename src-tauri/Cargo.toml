@@ -1,9 +1,9 @@
 [package]
 name = "shellx"
 version = "0.1.0"
-description = "A Tauri App"
+description = "ShellX - a SecureCRT-style SSH client"
 authors = ["you"]
-edition = "2024"
+edition = "2021"
 
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
@@ -22,6 +22,13 @@ tauri = { version = "2", features = [] }
 tauri-plugin-opener = "2"
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+russh = { version = "0.61", default-features = false, features = ["ring", "flate2", "rsa"] }
+futures-util = "0.3"
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "sync", "io-util", "time", "net", "fs"] }
+anyhow = "1"
+dirs = "6"
+russh-sftp = "3.0.1"
+arboard = "3.6"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

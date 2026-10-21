@@ -1,0 +1,60 @@
+/* flexlayout 主题桥接：把库的 --flexlayout-* 变量指向项目 token，
+   深浅两档由 [data-theme] 上的 token 自动切换，这里不再分档写。 */
+
+.workspace {
+  flex: 1;
+  min-height: 0;
+  position: relative;
+  background: var(--bg);
+}
+
+.workspace .flexlayout__layout {
+  --flexlayout-color-text: var(--text);
+  --flexlayout-color-background: var(--bg-content);
+  --flexlayout-color-base: var(--bg);
+
+  /* 库把 1..6 当作由浅到深的一串面板底色，这里按语义档位对齐 token */
+  --flexlayout-color-1: var(--bg);
+  --flexlayout-color-2: var(--bg-hover);
+  --flexlayout-color-3: var(--bg-pill);
+  --flexlayout-color-4: var(--bg-selected);
+  --flexlayout-color-5: var(--bg-active);
+  --flexlayout-color-6: var(--border-strong);
+
+  --flexlayout-color-splitter: var(--line);
+  --flexlayout-color-splitter-hover: var(--border-strong);
+  --flexlayout-color-splitter-drag: var(--accent);
+  --flexlayout-color-focus: var(--accent);
+  --flexlayout-color-icon: var(--text-2);
+  --flexlayout-color-overflow: var(--text-2);
+  --flexlayout-color-edge-icon: var(--text-2);
+  --flexlayout-color-edge-marker: var(--border-strong);
+  --flexlayout-color-border-tab-unselected: var(--text-2);
+  --flexlayout-color-tab-unselected: var(--text-2);
+
+  /* 拖放落点提示走品牌绿，别用库默认的浅蓝/浅绿 */
+  --flexlayout-color-drag1: var(--accent);
+  --flexlayout-color-drag2: var(--accent-hover);
+  --flexlayout-color-drag1-background: rgba(39, 189, 81, 0.16);
+  --flexlayout-color-drag2-background: rgba(39, 189, 81, 0.1);
+
+  --flexlayout-font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --flexlayout-font-size: 13px;
+  --flexlayout-splitter-size: 5px;
+}
+
+/* 边缘工具窗口的竖排标签：底色跟面板一致，选中才提亮 */
+.workspace .flexlayout__border_button {
+  font-size: 12px;
+}
+
+.workspace .flexlayout__tab_button--selected {
+  font-weight: 600;
+}
+
+/* 终端标签页的状态点在 leading 槽里，选中态加粗即可 */
+
+/* 钉住态用品牌色点亮，一眼能看出这块面板是常驻还是自动隐藏 */
+.workspace .pin-toggle[aria-pressed="true"] {
+  color: var(--accent);
+}

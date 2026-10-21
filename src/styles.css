@@ -1,0 +1,710 @@
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body,
+#root {
+  height: 100%;
+}
+
+:root {
+  color-scheme: dark;
+
+  /* 冷调深色：蓝灰外框 + 更深的 content 层。
+     标"实测"的取自深色参考截图逐像素取样，标"派生"的是同族内插值。
+     注意 content 比外框更暗、分隔线比两层都暗，这是该参考图的结构。 */
+  --bg: #222426; /* 实测 n=375605：标题栏、侧栏、标签栏、面板 */
+  --bg-content: #181a1b; /* 实测 n=333445：页面与终端底 */
+  --bg-hover: #2a2c2e; /* 实测：介于 bg 与 selected 之间 */
+  --bg-selected: #3e3f41; /* 实测：选中项 */
+  --bg-active: #46484a; /* 实测 n=44px：参考图列表选中行比胶囊选中态再亮一档 */
+  --bg-pill: #2c2e2e; /* 实测：输入框、下拉底 */
+  --line: #121517; /* 实测：面板间分隔线，比相邻两层都深 */
+  --border: #303233; /* 实测 */
+  --border-strong: #3a3c3e; /* 实测 */
+  --btn-hover: #3a3c3e;
+  --text: #e7e9ed; /* 实测：主文字 */
+  --text-2: #a2a5a7; /* 实测：标题栏文字、次级 */
+  --text-3: #75787a; /* 实测：置灰项文字；参考图占位符为 #808385 同档 */
+  --accent: #27bd51; /* 实测：整图最强绿像素 */
+  --accent-hover: #3fd066; /* 派生：深档 hover 走亮 */
+  --danger-text: #ff9c99;
+  --danger-bg: rgba(255, 156, 153, 0.16);
+  /* xterm 的 ANSI 色：默认调色板在 #181a1b 上红只有 ~1.9:1，中文报错几乎看不清 */
+  --ansi-red: #f14c4c;
+  --ansi-yellow: #e2bb6f; /* 实测：参考图 modified 徽标的琥珀色 */
+  --ansi-green: #27bd51; /* 与 --accent 同值，终端绿和界面绿一致 */
+  --scroll-hover: #4a4d52; /* 派生：border-strong 上一档 */
+  --menu-bg: #252627; /* 实测：卡片/浮层底 */
+  --field: #2c2e2e; /* 输入框/下拉底色 */
+  --selection: #3e3f41; /* xterm 选区，与选中项同值 */
+  --ring: rgba(39, 189, 81, 0.2);
+  --scrim: rgba(0, 0, 0, 0.6);
+  --shadow-strong: 0 18px 60px rgba(0, 0, 0, 0.6);
+  --shadow-ctx: 0 14px 44px rgba(0, 0, 0, 0.55);
+
+  --radius: 6px;
+}
+
+[data-theme="light"] {
+  color-scheme: light;
+
+  /* 冷调：蓝灰外框 + 纯白内容层 + 深蓝灰文字。
+     标"实测"的取自参考截图逐像素取样，标"派生"的是同族内插值。 */
+  --bg: #f6f7fa; /* 实测：标题栏、侧栏、标签栏、面板 */
+  --bg-content: #ffffff; /* 实测：页面与终端底 */
+  /* 参考图的分层靠「比容器明显深一档」，原来的 #EDEFF2 相对外框只有 -0.069 线性亮度，在 #f6f7fa 上看不出来。
+     下面两档压到 -0.126 / -0.167，选中行文字仍 ≥9.5:1。 */
+  --bg-hover: #eef1f6; /* 派生：bg 与 selected 之间 */
+  --bg-selected: #e4e8ef; /* 选中档 */
+  --bg-active: #dde3ec; /* 派生：与选中档分两级，对应深档 #46484A / #3E3F41 的关系 */
+  --bg-pill: #f0f0f2; /* 实测：输入框、下拉底 */
+  --line: #e9eaec; /* 实测：侧栏头下那道渐变分界的中位色 */
+  --border: #dddddd; /* 实测：设置卡与内容区之间 2px 竖分隔线 */
+  --border-strong: #cdd2dc; /* 实测：输入框描边与设置栏顶那道细规则线同值，比面板分隔线更深一档 */
+  --btn-hover: #e6e9ee;
+  --text: #2b3547; /* 实测：主文字 */
+  --text-2: #727985; /* 实测：次级文字、未选中标签 */
+  --text-3: #9fa4ac; /* 实测：占位符 */
+  --accent: #35cc5f; /* 实测：开关绿 */
+  --accent-hover: #2dbb54; /* 派生：亮档 hover 走深 */
+  --danger-text: #b3352e;
+  --danger-bg: rgba(179, 53, 46, 0.1);
+  /* 亮档要压深才立得住：绿/黄沿用深档色相，只把明度拉下来 */
+  --ansi-red: #b3352e;
+  --ansi-yellow: #8a6a12;
+  --ansi-green: #177038;
+  --scroll-hover: #c3c9d2;
+  --menu-bg: #f8f8f8; /* 实测：亮档浮层底，纯白配白页会看不出层级 */
+  --field: #f0f0f2; /* 实测：输入框、下拉内缩灰底 */
+  --selection: #dfe7f2;
+  --ring: rgba(53, 204, 95, 0.22);
+  --scrim: rgba(43, 53, 71, 0.28);
+  --shadow-strong: 0 18px 60px rgba(43, 53, 71, 0.18);
+  --shadow-ctx: 0 14px 44px rgba(43, 53, 71, 0.14);
+}
+
+body {
+  font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  font-size: 13px;
+  color: var(--text);
+  background: var(--bg);
+  user-select: none;
+  overflow: hidden;
+  accent-color: var(--accent);
+}
+
+.app {
+  display: flex;
+  height: 100%;
+}
+
+/* ---------- 侧栏 Session Manager ---------- */
+
+.sidebar-header {
+  display: flex;
+  align-items: center;
+  height: 38px;
+  padding: 0 14px;
+  font-size: 11px; /* 实测：参考图侧栏标题字面高 21 物理像素 @200% */
+  font-weight: 600;
+  letter-spacing: 0.3px;
+  color: var(--text);
+  flex: none;
+}
+
+.sidebar-toolbar {
+  display: flex;
+  gap: 2px;
+  padding: 0 8px 6px;
+  border-bottom: 1px solid var(--line);
+}
+
+.sidebar-toolbar button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid transparent;
+  background: none;
+  border-radius: var(--radius);
+  padding: 4px 8px;
+  cursor: pointer;
+  font-size: 13px;
+  color: var(--text-2);
+}
+
+.sidebar-toolbar button:hover:not(:disabled) {
+  background: var(--bg-selected);
+  color: var(--text);
+}
+
+.sidebar-toolbar button:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+
+.filter-input {
+  margin: 8px 10px;
+  padding: 6px 10px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--field);
+  font-size: 12px;
+  color: var(--text);
+}
+
+.filter-input::placeholder {
+  color: var(--text-3);
+}
+
+.filter-input:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--ring);
+}
+
+.sidebar-tree {
+  flex: 1;
+  overflow: auto;
+  padding: 0 6px 10px;
+}
+
+.tree-row {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  height: 22px; /* 实测：参考图列表行 44 物理像素 @200% */
+  padding: 0 6px;
+  border-radius: var(--radius);
+  cursor: default;
+  white-space: nowrap;
+  /* 参考图的文件树用次级灰，但这里会话树就是面板的主内容，按主文字档取色 */
+  color: var(--text);
+}
+
+.tree-row:hover {
+  background: var(--bg-hover);
+}
+
+.tree-row.selected {
+  background: var(--bg-active);
+  color: var(--text);
+}
+
+.tree-caret {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 14px;
+  color: var(--text-3);
+  flex: none;
+  cursor: pointer;
+}
+
+.tree-caret.placeholder {
+  cursor: default;
+}
+
+.tree-icon {
+  display: inline-flex;
+  align-items: center;
+  flex: none;
+}
+
+.tree-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+/* 行内改名输入：坐在原 label 的位置上，靠 ring 表示"这行正在编辑" */
+.inline-edit {
+  flex: 1;
+  min-width: 0;
+  height: 18px;
+  padding: 0 3px;
+  font: inherit;
+  color: var(--text);
+  background: var(--field);
+  border: 1px solid var(--accent);
+  border-radius: 3px;
+  outline: none;
+  box-shadow: 0 0 0 2px var(--ring);
+}
+
+/* ---------- 主区 ---------- */
+
+.status-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--text-3);
+}
+
+.status-dot.ready {
+  background: var(--accent);
+}
+
+.status-dot.connecting {
+  background: #d8a93c;
+  animation: pulse 1s infinite;
+}
+
+.status-dot.error {
+  background: #f0605d;
+}
+
+.status-dot.closed {
+  background: var(--text-3);
+}
+
+@keyframes pulse {
+  50% {
+    opacity: 0.3;
+  }
+}
+
+.pane {
+  position: absolute;
+  inset: 0;
+  background: var(--bg-content);
+}
+
+.terminal-host {
+  position: absolute;
+  inset: 6px 0 6px 10px;
+  /* 拖分隔条时终端要等突发结束才 fit，这期间旧的宽会超出宿主，别让它画到文件面板上 */
+  overflow: hidden;
+}
+
+.empty-state {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--text-2);
+  font-size: 14px;
+}
+
+.empty-state svg {
+  vertical-align: -2px;
+  margin: 0 2px;
+}
+
+/* ---------- 左侧停靠区：Session / Command 两个面板共用 ---------- */
+
+/* ---------- Command Manager ---------- */
+.cmd-manager {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 命令行的圆点，hover 能看到实际要发送的文本 */
+.cmd-dot {
+  display: block;
+  width: 7px;
+  height: 7px;
+  margin: 0 4px;
+  border-radius: 50%;
+  background: var(--accent);
+}
+
+.cmd-textarea {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 9px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--field);
+  color: var(--text);
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 12px;
+  line-height: 1.5;
+  resize: vertical;
+  user-select: text;
+}
+
+.cmd-textarea::placeholder {
+  color: var(--text-3);
+}
+
+.cmd-textarea:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--ring);
+}
+
+.form-col {
+  align-items: flex-start;
+}
+
+.form-col > span {
+  padding-top: 6px;
+}
+
+/* ---------- 对话框 ---------- */
+.dialog-overlay {
+  position: fixed;
+  inset: 0;
+  background: var(--scrim);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 100;
+}
+
+.dialog {
+  width: 460px;
+  background: var(--menu-bg); /* 浮层走"抬起"那一档：深档 content 比外框更暗，直接用会像个洞 */
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  box-shadow: var(--shadow-strong);
+}
+
+.dialog-titlebar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 14px 16px 12px;
+  font-weight: 600;
+  letter-spacing: 0.2px;
+}
+
+.dialog-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: none;
+  background: none;
+  cursor: pointer;
+  color: var(--text-3);
+  padding: 3px;
+  margin-right: -4px;
+  border-radius: var(--radius);
+}
+
+.dialog-close:hover {
+  background: var(--danger-bg);
+  color: var(--danger-text);
+}
+
+.dialog-body {
+  padding: 0 18px 10px;
+}
+
+.pwd-note {
+  margin: 0 0 14px;
+  line-height: 1.5;
+}
+
+.pwd-note span {
+  color: var(--text-2);
+}
+
+.form-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.form-row > span {
+  width: 86px;
+  flex: none;
+  text-align: right;
+  color: var(--text);
+}
+
+.form-row input,
+.form-row select {
+  flex: 1;
+  min-width: 0;
+  padding: 5px 9px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--field);
+  color: var(--text);
+  font-size: 13px;
+  user-select: text;
+}
+
+.form-row input::placeholder {
+  color: var(--text-3);
+}
+
+.form-row input:focus,
+.form-row select:focus {
+  outline: none;
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px var(--ring);
+}
+
+.form-row input:disabled {
+  color: var(--text-3);
+}
+
+.form-row .input-sm {
+  flex: 0 0 68px;
+}
+
+.hint {
+  margin: -4px 0 10px 94px;
+  font-size: 12px; /* 实测：参考图说明文字 23 物理像素 @200%，比正文小一档而不是小两档 */
+  color: var(--text-3);
+}
+
+.auth-group {
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 10px;
+  margin: 4px 0 12px 94px;
+  display: flex;
+  gap: 10px;
+}
+
+.auth-list {
+  flex: 1;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg);
+  max-height: 104px;
+  overflow: auto;
+  padding: 2px;
+}
+
+.auth-item {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  padding: 4px 7px;
+  border-radius: 4px;
+  cursor: default;
+  color: var(--text);
+}
+
+.auth-item:hover {
+  background: var(--bg-selected);
+}
+
+.auth-props {
+  margin: 0 0 12px 94px;
+  padding: 10px;
+  border: 1px dashed var(--border-strong);
+  border-radius: 8px;
+}
+
+.auth-props .form-row > span {
+  width: 80px;
+}
+
+.check-rows {
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+  margin-left: 94px;
+  color: var(--text);
+}
+
+.check-rows label {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+}
+
+.check-rows label:hover {
+  color: var(--text);
+}
+
+.dialog-footer {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  padding: 12px 18px 16px;
+}
+
+.btn {
+  min-width: 76px;
+  padding: 5px 14px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--bg-pill);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 13px;
+}
+
+.btn:hover:not(:disabled) {
+  background: var(--btn-hover);
+  border-color: var(--text-3);
+}
+
+.btn:disabled {
+  opacity: 0.4;
+  cursor: default;
+}
+
+.btn-primary {
+  border-color: transparent;
+  background: var(--accent);
+  color: #0d1b10;
+  font-weight: 600;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: transparent;
+}
+
+/* 禁用态若仍留绿色填充，40% 透明度下看着像可用 */
+.btn-primary:disabled {
+  background: var(--bg-pill);
+  border-color: var(--border);
+  color: var(--text-3);
+  opacity: 1;
+}
+
+/* ---------- xterm 微调 ---------- */
+.terminal-host .xterm {
+  height: 100%;
+}
+
+::-webkit-scrollbar {
+  width: 11px;
+  height: 11px;
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: 8px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--scroll-hover);
+  border: 3px solid transparent;
+  background-clip: content-box;
+}
+
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+/* ---- 右键菜单 ---- */
+/* 透明铺满层：菜单和它的子菜单都是 fixed 定位，共用一层才能判断"点在了菜单外面" */
+.ctx-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  pointer-events: none;
+}
+
+.ctx-menu {
+  position: fixed;
+  min-width: 250px;
+  padding: 5px;
+  background: var(--menu-bg);
+  border: 1px solid var(--border-strong);
+  border-radius: 8px;
+  box-shadow: var(--shadow-ctx);
+  font-size: 13px;
+  user-select: none;
+  pointer-events: auto;
+}
+
+.ctx-submenu {
+  z-index: 61;
+  min-width: 180px;
+}
+
+.ctx-item {
+  display: grid;
+  grid-template-columns: 18px 1fr auto 14px;
+  align-items: center;
+  gap: 8px;
+  height: 27px;
+  padding: 0 8px;
+  border-radius: 5px;
+  color: var(--text);
+  cursor: default;
+  white-space: nowrap;
+}
+
+.ctx-item:hover:not(.disabled) {
+  background: var(--bg-selected);
+}
+
+.ctx-item.disabled {
+  color: var(--text-3);
+}
+
+/* 勾用边框画：Segoe UI Variable Text 没有 U+2713，直接写字面量会出豆腐块 */
+.ctx-check {
+  position: relative;
+  height: 100%;
+}
+
+.ctx-check.on::after {
+  content: "";
+  position: absolute;
+  left: 4px;
+  top: 7px;
+  width: 4px;
+  height: 8px;
+  border: solid var(--accent);
+  border-width: 0 2px 2px 0;
+  transform: rotate(40deg);
+}
+
+.ctx-accel {
+  color: var(--text-2);
+  font-size: 12px;
+}
+
+.ctx-item.disabled .ctx-accel {
+  color: var(--text-3);
+}
+
+.ctx-sub {
+  display: inline-flex;
+  justify-content: flex-end;
+  align-items: center;
+  color: var(--text-2);
+}
+
+.ctx-sep {
+  height: 1px;
+  margin: 5px 6px;
+  background: var(--line);
+}
+
+.ctx-item.hot {
+  background: var(--bg-selected);
+}
+
+/* ---------- 工作区面板（flexlayout 负责定位，内容只铺满） ---------- */
+/* 库给每个面板 div 打了 position:absolute，绝对定位的铺满方式在这里最稳 */
+.dock-fill {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  background: var(--bg);
+  overflow: hidden;
+}
+
+/* 文件面板的宽高交给布局的分隔条，基类里的 border-left 也由分隔条替代 */
+.workspace .filepanel {
+  width: 100% !important;
+  max-width: 100%;
+  height: 100%;
+  flex: 1;
+  min-height: 0;
+  border-left: 0;
+}
