@@ -15,9 +15,15 @@ import {
   IconTrash,
   IconX,
 } from "@tabler/icons-react";
+import { fmtSize } from "./format";
 import { ink } from "./icons";
+import ConfirmDialog from "./ConfirmDialog";
 import InlineEdit from "./InlineEdit";
+import PanelPin from "./PanelPin";
 import { ConnectParams } from "./QuickConnect";
+import { enabledMethods } from "./types";
+import { beginTransfer, endTransfer, reportTransfer, useTransferActivity, type TransferDir } from "./transfers";
+import { useI18n } from "./i18n";
 import "./filepanel.css";
 
 interface Entry {
@@ -36,7 +42,6 @@ interface Side {
   sel: Entry | null;
 }
 
-type Prog = { name: string; done: number; total: number };
 type ProgEvent =
   | { event: "tick"; name: string; done: number; total: number }
   | { event: "done"; name: string };
@@ -47,19 +52,6 @@ const emptySide: Side = { path: "", parent: "", entries: [], sel: null };
 
 /// renaming 的哨兵值：表示当前是"新建目录"那一行，而不是某个已存在条目在改名
 const NEW_ROW = "\0new";
-
-function fmtSize(n: number | null): string {
-  if (n === null) return "—";
-  if (n < 1024) return `${n} B`;
-  const units = ["KB", "MB", "GB", "TB"];
-  let v = n / 1024;
-  let i = 0;
-  while (v >= 1024 && i < units.length - 1) {
-    v /= 1024;
-    i++;
-  }
-  return `${v.toFixed(v >= 100 ? 0 : 1)} ${units[i]}`;
-}
 
 function fmtDate(sec: number | null): string {
   if (!sec) return "";
@@ -100,18 +92,29 @@ interface Props {
   tabId: string | null;
   params: ConnectParams | null;
   onClose(): void;
+  /// 传输开始时通知 App 放出底部的传输面板
+  onTransferStart?(): void;
+  /// 顶栏右上角的图钉：钉住=常驻，取消=自动隐藏
+  pinned?: boolean;
+  onTogglePin?(): void;
+  /// 顶栏作为拖拽把手（flexlayout 拖放），由 App 注入
+  drag?: React.HTMLAttributes<HTMLDivElement>;
 }
 
-export default function FilePanel({ tabId, params, onClose }: Props) {
+export default function FilePanel({ tabId, params, onClose, onTransferStart, pinned, onTogglePin, drag }: Props) {
+  const { t } = useI18n();
   const [local, setLocal] = useState<Side>(emptySide);
   const [remote, setRemote] = useState<Side>(emptySide);
   const [remoteState, setRemoteState] = useState<RemoteState>("idle");
   /// 新建/重命名/删除作用于哪一侧；点任一栏即切换
   const [focus, setFocus] = useState<"local" | "remote">("remote");
-  const [prog, setProg] = useState<Prog | null>(null);
+  /// 进度记录在全局 store 里（底部传输面板和状态栏读），这里只需要"有没有在传"
+  const busy = useTransferActivity();
   const [error, setError] = useState<string | null>(null);
   /// 正在行内改名的条目路径，null 表示没有
   const [renaming, setRenaming] = useState<string | null>(null);
+  /// 删除确认框：记下条目和所在侧，点确定时才真删
+  const [confirmDel, setConfirmDel] = useState<{ entry: Entry; side: "local" | "remote" } | null>(null);
   /// 本地侧"快速访问"下拉（常用文件夹 + 盘符），null 表示没展开
   const [quick, setQuick] = useState<Entry[] | null>(null);
   const lseq = useRef(0);
@@ -197,6 +200,7 @@ export default function FilePanel({ tabId, params, onClose }: Props) {
         username: params.username,
         password: params.password,
         keyPath: params.keyPath,
+        methods: enabledMethods(params.auth),
       },
     })
       .then((home) => {
@@ -205,7 +209,7 @@ export default function FilePanel({ tabId, params, onClose }: Props) {
         return goRemote(home);
       })
       .catch((e) => {
-        if (!gone) setError(`SFTP 连接失败：${e}`);
+        if (!gone) setError(t("fp.sftpError", { e: String(e) }));
       });
     const id = tabId;
     return () => {
@@ -215,37 +219,49 @@ export default function FilePanel({ tabId, params, onClose }: Props) {
     // goRemote 只随 tabId 变，列在这里会让每次切换多跑一次 close+open
   }, [tabId, params]);
 
-  const transfer = async (run: (onEvent: Channel<ProgEvent>) => Promise<void>, then: () => Promise<void>) => {
-    setProg({ name: "", done: 0, total: 0 });
+  /// 一次传输：进度写进全局 store，传完再刷新对应一侧的列表
+  const transfer = async (
+    dir: TransferDir,
+    file: Entry,
+    run: (onEvent: Channel<ProgEvent>) => Promise<void>,
+    then: () => Promise<void>,
+  ) => {
+    const id = beginTransfer(dir, file.name, file.size ?? 0);
+    onTransferStart?.();
     setError(null);
     try {
       const ch = new Channel<ProgEvent>();
       ch.onmessage = (ev) => {
-        if (ev.event === "tick") setProg({ name: ev.name, done: ev.done, total: ev.total });
+        if (ev.event === "tick") reportTransfer(id, ev.done, ev.total);
       };
       await run(ch);
+      endTransfer(id);
       await then();
     } catch (e) {
-      setError(String(e));
-    } finally {
-      setProg(null);
+      const msg = String(e);
+      endTransfer(id, msg);
+      setError(msg);
     }
   };
 
   const upload = () => {
-    if (!tabId || !local.sel || local.sel.dir || !remote.path) return;
-    const file = local.sel.path;
+    if (!tabId || !local.sel || local.sel.dir || !remote.path || busy) return;
+    const file = local.sel;
     void transfer(
-      (onEvent) => invoke("sftp_upload", { id: tabId, local: file, remoteDir: remote.path, onEvent }),
+      "up",
+      file,
+      (onEvent) => invoke("sftp_upload", { id: tabId, local: file.path, remoteDir: remote.path, onEvent }),
       () => goRemote(remote.path),
     );
   };
 
   const download = () => {
-    if (!tabId || !remote.sel || !local.path) return;
-    const file = remote.sel.path;
+    if (!tabId || !remote.sel || !local.path || busy) return;
+    const file = remote.sel;
     void transfer(
-      (onEvent) => invoke("sftp_download", { id: tabId, remote: file, localDir: local.path, onEvent }),
+      "down",
+      file,
+      (onEvent) => invoke("sftp_download", { id: tabId, remote: file.path, localDir: local.path, onEvent }),
       () => goLocal(local.path),
     );
   };
@@ -288,13 +304,8 @@ export default function FilePanel({ tabId, params, onClose }: Props) {
 
   const del = () => {
     const t = target.sel;
-    if (!t || !window.confirm(`确定删除 "${t.name}" 吗？`)) return;
-    const back = () => (focus === "local" ? goLocal(local.path) : goRemote(remote.path));
-    const job =
-      focus === "local"
-        ? invoke("local_remove", { path: t.path, dir: t.dir })
-        : invoke("sftp_remove", { id: tabId, path: t.path, dir: t.dir });
-    job.then(back).catch(showErr);
+    if (!t) return;
+    setConfirmDel({ entry: t, side: focus });
   };
 
   const renderPane = (
@@ -319,13 +330,13 @@ export default function FilePanel({ tabId, params, onClose }: Props) {
         </span>
         <span className="fp-head-actions">
           <button
-            title="上一级"
+            title={t("fp.up")}
             disabled={!data.path}
             onClick={() => void go(side === "local" ? data.parent : remoteParent(data.path))}
           >
             <IconArrowBarUp {...ink(15)} />
           </button>
-          <button title="刷新" disabled={!data.path} onClick={() => void go(data.path)}>
+          <button title={t("fp.refresh")} disabled={!data.path} onClick={() => void go(data.path)}>
             <IconRefresh {...ink(15)} />
           </button>
           {home}
@@ -334,7 +345,7 @@ export default function FilePanel({ tabId, params, onClose }: Props) {
       <input
         className="fp-path"
         value={data.path}
-        placeholder="路径，回车跳转"
+        placeholder={t("fp.pathPlaceholder")}
         spellCheck={false}
         onChange={(e) => setData({ ...data, path: e.target.value })}
         onKeyDown={(e) => {
@@ -381,48 +392,54 @@ export default function FilePanel({ tabId, params, onClose }: Props) {
             </div>
           ),
         )}
-        {data.entries.length === 0 && renaming !== NEW_ROW && <p className="fp-empty">{hint || "空目录"}</p>}
+        {data.entries.length === 0 && renaming !== NEW_ROW && <p className="fp-empty">{hint || t("fp.empty")}</p>}
       </div>
     </div>
   );
 
-  const pct = prog && prog.total ? Math.min(100, Math.round((prog.done / prog.total) * 100)) : 0;
   const remoteHint =
-    remoteState === "connecting" ? "连接中…" : remoteState === "idle" ? (tabId ? "未连接" : "没有活动标签页") : "";
+    remoteState === "connecting"
+      ? t("fp.connecting")
+      : remoteState === "idle"
+        ? tabId
+          ? t("fp.notConnected")
+          : t("fp.noActiveTab")
+        : "";
 
   return (
     <div className="filepanel">
-      <div className="fp-bar">
+      <div className="fp-bar" {...drag}>
         <button
-          title="上传：本地选中项 → 远端当前目录"
-          disabled={!local.sel || local.sel.dir || remoteState !== "ready" || !!prog}
+          title={t("fp.upload")}
+          disabled={!local.sel || local.sel.dir || remoteState !== "ready" || busy}
           onClick={upload}
         >
           <IconFileUpload {...ink(16)} />
         </button>
         <button
-          title="下载：远端选中项 → 本地当前目录"
-          disabled={!remote.sel || remote.sel.dir || !local.path || !!prog}
+          title={t("fp.download")}
+          disabled={!remote.sel || remote.sel.dir || !local.path || busy}
           onClick={download}
         >
           <IconFileDownload {...ink(16)} />
         </button>
         <span className="tb-sep" />
         <button
-          title={`在${focus === "local" ? "本地" : "远端"}当前目录新建子目录`}
+          title={focus === "local" ? t("fp.newDirLocal") : t("fp.newDirRemote")}
           disabled={!target.path}
           onClick={newDir}
         >
           <IconFolderPlus {...ink(16)} />
         </button>
-        <button title="重命名选中项" disabled={!target.sel} onClick={rename}>
+        <button title={t("fp.rename")} disabled={!target.sel} onClick={rename}>
           <IconPencil {...ink(16)} />
         </button>
-        <button title="删除选中项" disabled={!target.sel} onClick={del}>
+        <button title={t("fp.delete")} disabled={!target.sel} onClick={del}>
           <IconTrash {...ink(16)} />
         </button>
         <span className="fp-spacer" />
-        <button title="关闭文件面板" onClick={onClose}>
+        {onTogglePin && <PanelPin pinned={!!pinned} onToggle={onTogglePin} />}
+        <button title={t("fp.close")} onClick={onClose}>
           <IconX {...ink(16)} />
         </button>
       </div>
@@ -430,17 +447,17 @@ export default function FilePanel({ tabId, params, onClose }: Props) {
       <div className="fp-body">
         {renderPane(
           "local",
-          "本地",
+          t("fp.local"),
           local,
           setLocal,
           goLocal,
           <>
-            <button title="主目录" onClick={() => void invoke<string>("local_home").then(goLocal).catch(showErr)}>
+            <button title={t("fp.home")} onClick={() => void invoke<string>("local_home").then(goLocal).catch(showErr)}>
               <IconHome {...ink(15)} />
             </button>
             <span className="fp-quick-wrap">
               <button
-                title="快速访问：常用文件夹和驱动器"
+                title={t("fp.quickAccess")}
                 aria-expanded={!!quick}
                 aria-haspopup="true"
                 onClick={toggleQuick}
@@ -470,12 +487,12 @@ export default function FilePanel({ tabId, params, onClose }: Props) {
         )}
         {renderPane(
           "remote",
-          params ? `${params.username}@${params.host}` : "远端",
+          params ? `${params.username}@${params.host}` : t("fp.remote"),
           remote,
           setRemote,
           goRemote,
           <button
-            title="服务器根目录"
+            title={t("fp.serverRoot")}
             disabled={remoteState !== "ready"}
             onClick={() => void goRemote("/")}
           >
@@ -485,24 +502,31 @@ export default function FilePanel({ tabId, params, onClose }: Props) {
         )}
       </div>
 
+      {/* 进度条不画在这里：传输过程统一显示在底部的传输面板和状态栏 */}
       <div className="fp-foot">
-        {prog ? (
-          <>
-            <span className="fp-prog-name">{prog.name}</span>
-            <span className="fp-prog-track">
-              <i style={{ width: `${pct}%` }} />
-            </span>
-            <span className="fp-prog-pct">{pct}%</span>
-          </>
-        ) : (
-          <span className="fp-status">
-            {target.sel
-              ? `已选中 ${target.sel.name} · ${focus === "local" ? "本地" : "远端"}`
-              : `${params ? `${params.username}@${params.host}` : "未连接"} · 点选一侧后使用新建/重命名/删除`}
-          </span>
-        )}
+        <span className="fp-status">
+          {target.sel
+            ? t("fp.selected", { name: target.sel.name, side: focus === "local" ? t("fp.local") : t("fp.remote") })
+            : t("fp.footHint", { conn: params ? `${params.username}@${params.host}` : t("fp.notConnected") })}
+        </span>
       </div>
       {error && <div className="fp-error">{error}</div>}
+      {confirmDel && (
+        <ConfirmDialog
+          message={t("common.deleteConfirm", { name: confirmDel.entry.name })}
+          onCancel={() => setConfirmDel(null)}
+          onConfirm={() => {
+            const { entry, side } = confirmDel;
+            setConfirmDel(null);
+            const back = () => (side === "local" ? goLocal(local.path) : goRemote(remote.path));
+            const job =
+              side === "local"
+                ? invoke("local_remove", { path: entry.path, dir: entry.dir })
+                : invoke("sftp_remove", { id: tabId, path: entry.path, dir: entry.dir });
+            job.then(back).catch(showErr);
+          }}
+        />
+      )}
     </div>
   );
 }

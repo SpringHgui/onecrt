@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { IconX } from "@tabler/icons-react";
 import { ink } from "./icons";
+import { useI18n } from "./i18n";
 
 export interface CommandFields {
   name: string;
@@ -18,6 +19,7 @@ interface Props {
 }
 
 export default function CommandProperties({ title, initial, showText = true, onClose, onSubmit }: Props) {
+  const { t } = useI18n();
   const [name, setName] = useState(initial?.name ?? "");
   const [text, setText] = useState(initial?.text ?? "");
 
@@ -44,18 +46,18 @@ export default function CommandProperties({ title, initial, showText = true, onC
         </div>
         <div className="dialog-body">
           <label className="form-row">
-            <span>Name:</span>
+            <span>{t("cmd.name")}</span>
             <input value={name} onChange={(e) => setName(e.target.value)} autoFocus />
           </label>
           {showText && (
             <label className="form-row form-col">
-              <span>Command:</span>
+              <span>{t("cmd.command")}</span>
               <textarea
                 className="cmd-textarea"
                 rows={4}
                 spellCheck={false}
                 value={text}
-                placeholder="留空则使用名称作为命令文本"
+                placeholder={t("cmd.textPlaceholder")}
                 onChange={(e) => setText(e.target.value)}
               />
             </label>
@@ -63,10 +65,10 @@ export default function CommandProperties({ title, initial, showText = true, onC
         </div>
         <div className="dialog-footer">
           <button className="btn btn-primary" disabled={!name.trim()} onClick={submit}>
-            OK
+            {t("cmd.ok")}
           </button>
           <button className="btn" onClick={onClose}>
-            Cancel
+            {t("cmd.cancel")}
           </button>
         </div>
       </div>

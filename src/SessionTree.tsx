@@ -3,11 +3,6 @@ import { ink } from "./icons";
 import InlineEdit from "./InlineEdit";
 import { Node, isFolder } from "./types";
 
-const slog = (s: string) => {
-  const w = window as unknown as { __stLog?: string[] };
-  (w.__stLog ??= []).push(s);
-};
-
 interface Props {
   nodes: Node[];
   expanded: Set<string>;
@@ -17,6 +12,7 @@ interface Props {
   onToggle(id: string): void;
   onSelect(id: string): void;
   onActivate(node: Node): void;
+  onDelete(): void;
   onContextMenu(node: Node, e: React.MouseEvent): void;
   onRenameCommit(node: Node, name: string): void;
   onRenameCancel(): void;
@@ -70,10 +66,7 @@ function render(
           <InlineEdit
             initial={n.name}
             onCommit={(name) => props.onRenameCommit(n, name)}
-            onCancel={() => {
-              slog("cancel-prop");
-              props.onRenameCancel();
-            }}
+            onCancel={props.onRenameCancel}
           />
         ) : (
           <span className="tree-label">{n.name}</span>
@@ -93,6 +86,18 @@ function render(
 }
 
 export default function SessionTree(props: Props) {
-  slog(`r:${props.renamingId}/n${props.nodes.length}`);
-  return <div className="session-tree">{render(props.nodes, 0, props, "")}</div>;
+  return (
+    // tabIndex 让整棵树能接住焦点：点过行之后 Del 才知该作用于哪个面板
+    <div
+      className="session-tree"
+      tabIndex={0}
+      onKeyDown={(e) => {
+        if (e.key !== "Delete" || (e.target as HTMLElement).tagName === "INPUT") return;
+        e.preventDefault();
+        props.onDelete();
+      }}
+    >
+      {render(props.nodes, 0, props, "")}
+    </div>
+  );
 }

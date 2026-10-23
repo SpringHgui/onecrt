@@ -40,6 +40,8 @@ pub struct OpenArgs {
     pub password: String,
     #[serde(default)]
     pub key_path: String,
+    #[serde(default)]
+    pub methods: Vec<String>,
 }
 
 #[derive(Serialize, Clone)]
@@ -119,7 +121,7 @@ pub async fn open(mgr: &Shared, args: OpenArgs) -> Result<String, String> {
     .await
     .with_context(|| format!("无法连接到 {addr}"))
     .map_err(terminal::format_err)?;
-    terminal::authenticate(&mut handle, &args.username, &args.password, key)
+    terminal::authenticate(&mut handle, &args.username, &args.password, key, &args.methods)
         .await
         .map_err(terminal::format_err)?;
 

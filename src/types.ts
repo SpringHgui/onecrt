@@ -6,6 +6,23 @@ export interface SshSession {
   username: string;
   password: string;
   keyPath: string;
+  auth?: AuthMethod[];
+}
+
+/** 认证列表的一项：数组顺序即连接时的尝试顺序 */
+export interface AuthMethod {
+  method: string;
+  enabled: boolean;
+}
+
+export const AUTH_METHODS = ["PublicKey", "Password", "Keyboard Interactive"];
+
+export function defaultAuth(): AuthMethod[] {
+  return AUTH_METHODS.map((method) => ({ method, enabled: true }));
+}
+
+export function enabledMethods(auth: AuthMethod[] | undefined): string[] {
+  return (auth?.length ? auth : defaultAuth()).filter((a) => a.enabled).map((a) => a.method);
 }
 
 export interface Folder {

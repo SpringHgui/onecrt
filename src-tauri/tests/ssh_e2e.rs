@@ -143,6 +143,7 @@ fn args_for(port: u16, password: &str) -> OpenArgs {
         username: "root".into(),
         password: password.into(),
         key_path: String::new(),
+        methods: vec![],
         cols: 100,
         rows: 30,
     }

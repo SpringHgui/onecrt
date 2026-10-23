@@ -1,14 +1,20 @@
 import { useState } from "react";
-import { IconX } from "@tabler/icons-react";
+import { IconCaretDown, IconCaretUp, IconX } from "@tabler/icons-react";
 import { ink } from "./icons";
+import { AuthMethod, defaultAuth } from "./types";
+import AuthPropertiesDialog from "./AuthProperties";
+import { useI18n } from "./i18n";
 
 export interface ConnectParams {
   name: string;
   host: string;
   port: number;
   username: string;
+  /** 本次连接用的明文口令；storePassword 为假时为空，连接前由口令对话框补 */
   password: string;
+  storePassword: boolean;
   keyPath: string;
+  auth: AuthMethod[];
 }
 
 interface Props {
@@ -19,26 +25,39 @@ interface Props {
   onConnect(p: ConnectParams, saveSession: boolean): void;
 }
 
-const AUTH_METHODS = ["PublicKey", "Keyboard Interactive", "Password", "GSSAPI"];
-
 const PROTOCOLS = ["SSH2", "SSH1", "Telnet", "Telnet/TLS", "Local Shell", "RDP", "Serial", "TAPI", "Rlogin", "Raw"];
 
 export default function QuickConnect({ initial, showName, title = "Quick Connect", onClose, onConnect }: Props) {
+  const { t } = useI18n();
   const [protocol, setProtocol] = useState("SSH2");
   const [name, setName] = useState(initial?.name ?? "");
   const [host, setHost] = useState(initial?.host ?? "");
   const [port, setPort] = useState(initial?.port ?? 22);
   const [username, setUsername] = useState(initial?.username ?? "");
   const [password, setPassword] = useState(initial?.password ?? "");
+  const [storePassword, setStorePassword] = useState(initial?.storePassword ?? !!initial?.password);
   const [keyPath, setKeyPath] = useState(initial?.keyPath ?? "");
-  const [methods, setMethods] = useState<string[]>(AUTH_METHODS);
-  const [showProps, setShowProps] = useState(true);
+  const [auth, setAuth] = useState<AuthMethod[]>(initial?.auth?.length ? initial.auth : defaultAuth());
+  const [selected, setSelected] = useState<string | null>(auth[0]?.method ?? null);
+  const [propsFor, setPropsFor] = useState<string | null>(null);
   const [saveSession, setSaveSession] = useState(true);
   const [openInTab, setOpenInTab] = useState(true);
   const [showOnStartup, setShowOnStartup] = useState(true);
 
+  const selIndex = auth.findIndex((a) => a.method === selected);
+
   const toggleMethod = (m: string) =>
-    setMethods((prev) => (prev.includes(m) ? prev.filter((x) => x !== m) : [...prev, m]));
+    setAuth((prev) => prev.map((a) => (a.method === m ? { ...a, enabled: !a.enabled } : a)));
+
+  const move = (delta: number) =>
+    setAuth((prev) => {
+      const i = prev.findIndex((a) => a.method === selected);
+      const j = i + delta;
+      if (i < 0 || j < 0 || j >= prev.length) return prev;
+      const next = [...prev];
+      [next[i], next[j]] = [next[j], next[i]];
+      return next;
+    });
 
   const connect = () => {
     if (!host.trim()) return;
@@ -48,9 +67,10 @@ export default function QuickConnect({ initial, showName, title = "Quick Connect
         host: host.trim(),
         port: Number(port) || 22,
         username: username.trim(),
-        // 面板收起时不能把已存的口令/密钥路径当成空写回去，否则一次"改端口"就会清空密码
-        password,
+        password: storePassword ? password : "",
+        storePassword,
         keyPath: keyPath.trim(),
+        auth,
       },
       saveSession,
     );
@@ -67,7 +87,7 @@ export default function QuickConnect({ initial, showName, title = "Quick Connect
         </div>
         <div className="dialog-body">
           <label className="form-row">
-            <span>Protocol:</span>
+            <span>{t("qc.protocol")}</span>
             <select value={protocol} onChange={(e) => setProtocol(e.target.value)}>
               {PROTOCOLS.map((p) => (
                 <option key={p} disabled={p !== "SSH2"}>
@@ -76,87 +96,100 @@ export default function QuickConnect({ initial, showName, title = "Quick Connect
               ))}
             </select>
           </label>
-          <div className="hint">当前仅实现 SSH2，其余协议在列表中置灰占位。</div>
+          <div className="hint">{t("qc.hint")}</div>
           {showName && (
             <label className="form-row">
-              <span>Session name:</span>
+              <span>{t("qc.sessionName")}</span>
               <input value={name} onChange={(e) => setName(e.target.value)} autoFocus />
             </label>
           )}
           <label className="form-row">
-            <span>Hostname:</span>
+            <span>{t("qc.hostname")}</span>
             <input value={host} onChange={(e) => setHost(e.target.value)} autoFocus={!showName} />
           </label>
           <div className="form-row">
-            <span>Port:</span>
+            <span>{t("qc.port")}</span>
             <input className="input-sm" type="number" value={port} onChange={(e) => setPort(Number(e.target.value))} />
-            <span>Firewall:</span>
+            <span>{t("qc.firewall")}</span>
             <select defaultValue="None">
-              <option>None</option>
+              <option>{t("qc.none")}</option>
             </select>
           </div>
           <label className="form-row">
-            <span>Username:</span>
+            <span>{t("qc.username")}</span>
             <input value={username} onChange={(e) => setUsername(e.target.value)} />
           </label>
           <fieldset className="auth-group">
-            <legend>Authentication</legend>
+            <legend>{t("qc.auth")}</legend>
             <div className="auth-list">
-              {AUTH_METHODS.map((m) => (
-                <label key={m} className="auth-item">
-                  <input type="checkbox" checked={methods.includes(m)} onChange={() => toggleMethod(m)} />
-                  <span>{m}</span>
-                </label>
+              {auth.map((a) => (
+                <div
+                  key={a.method}
+                  className={`auth-item${a.method === selected ? " sel" : ""}`}
+                  onClick={() => setSelected(a.method)}
+                >
+                  <input type="checkbox" checked={a.enabled} onChange={() => toggleMethod(a.method)} />
+                  <span>{a.method}</span>
+                </div>
               ))}
             </div>
-            <button className="btn" disabled={!methods.length} onClick={() => setShowProps((v) => !v)}>
-              Properties...
+            <div className="auth-arrows">
+              <button className="btn-arrow" title={t("qc.moveUp")} disabled={selIndex <= 0} onClick={() => move(-1)}>
+                <IconCaretUp {...ink(14)} />
+              </button>
+              <button
+                className="btn-arrow"
+                title={t("qc.moveDown")}
+                disabled={selIndex < 0 || selIndex >= auth.length - 1}
+                onClick={() => move(1)}
+              >
+                <IconCaretDown {...ink(14)} />
+              </button>
+            </div>
+            <button className="btn" disabled={!selected} onClick={() => selected && setPropsFor(selected)}>
+              {t("qc.properties")}
             </button>
           </fieldset>
-          {showProps && (
-            <div className="auth-props">
-              {methods.includes("Password") && (
-                <label className="form-row">
-                  <span>Password:</span>
-                  <input type="password" value={password} onChange={(e) => setPassword(e.target.value)} />
-                </label>
-              )}
-              {methods.includes("PublicKey") && (
-                <label className="form-row">
-                  <span>Private key:</span>
-                  <input
-                    placeholder="C:\\Users\\me\\.ssh\\id_ed25519 或 ~\\.ssh\\id_rsa"
-                    value={keyPath}
-                    onChange={(e) => setKeyPath(e.target.value)}
-                  />
-                </label>
-              )}
-            </div>
-          )}
+          <div className="hint auth-note">{t("qc.authNote")}</div>
           <div className="check-rows">
             <label>
               <input type="checkbox" checked={showOnStartup} onChange={(e) => setShowOnStartup(e.target.checked)} />
-              Show quick connect on startup
+              {t("qc.showOnStartup")}
             </label>
             <label>
               <input type="checkbox" checked={saveSession} onChange={(e) => setSaveSession(e.target.checked)} />
-              Save session
+              {t("qc.saveSession")}
             </label>
             <label>
               <input type="checkbox" checked={openInTab} onChange={(e) => setOpenInTab(e.target.checked)} />
-              Open in a tab
+              {t("qc.openInTab")}
             </label>
           </div>
         </div>
         <div className="dialog-footer">
           <button className="btn btn-primary" disabled={!host.trim()} onClick={connect}>
-            Connect
+            {t("qc.connect")}
           </button>
           <button className="btn" onClick={onClose}>
-            Cancel
+            {t("common.cancel")}
           </button>
         </div>
       </div>
+      {propsFor && (
+        <AuthPropertiesDialog
+          method={propsFor}
+          password={password}
+          storePassword={storePassword}
+          keyPath={keyPath}
+          onClose={() => setPropsFor(null)}
+          onOk={(r) => {
+            setPassword(r.password);
+            setStorePassword(r.storePassword);
+            setKeyPath(r.keyPath);
+            setPropsFor(null);
+          }}
+        />
+      )}
     </div>
   );
 }

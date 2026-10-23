@@ -10,7 +10,7 @@
 - **终端标签页**：xterm.js 渲染，真实 SSH PTY，支持自适应尺寸、粘贴、多会话并行，标签上显示连接状态。
 - **标签页右键菜单**：Rename / Reset Name、Reconnect / Disconnect、Close (Ctrl+F4) / Close Disconnected Tabs / Close Other Tabs / Close Tabs to the Right / Close All Tabs、Clone Session、Session Options...。Rename 只改标签显示名，Reset Name 回到会话名；改会话本身用 Session Options。Clone Session 用同一份连接参数另开一个标签页，快速连接型标签（无对应会话节点）的 Session Options 置灰。
 - **Command Manager**：与 Session Manager 共用左侧停靠区，底部两个标签切换。同样是文件夹 + 命令树，支持过滤、新建命令 / 新建文件夹、剪切 / 复制 / 粘贴、删除、重命名、展开 / 折叠全部、属性；双击命令或点工具栏箭头发送到当前终端；右键 "Send Command to" 按作用域发送：All Sessions 广播给所有就绪标签页，Visible Sessions 只发给当前可见的那个。命令的显示名与实际发送文本分开存储，允许多行。
-- **工具栏**：菜单栏下方一行，依次为：新建会话、快速连接（用活动标签的连接参数打开 Quick Connect，没有活动标签时是空白新建）、切换下一个标签、重新连接 | 复制、粘贴、打印 | 会话选项、键盘映射、端口转发。有活动标签时才可用；打印 / 键盘映射 / 端口转发为置灰占位。视图菜单的"工具栏"控制这一行。
+- **工具栏**：菜单栏下方一行，依次为：新建连接（用活动标签的连接参数打开 Quick Connect，没有活动标签时是空白新建）、切换下一个标签、重新连接 | 复制、粘贴、打印 | 会话选项、键盘映射、端口转发。有活动标签时才可用；打印 / 键盘映射 / 端口转发为置灰占位。视图菜单的"工具栏"控制这一行。
 - **认证**：密码、公钥（OpenSSH 私钥，支持 `~` 展开）、键盘交互；失败时回传具体原因。
 
 ## 开发

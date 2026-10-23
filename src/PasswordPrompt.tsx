@@ -1,6 +1,7 @@
 import { useState } from "react";
 import { IconX } from "@tabler/icons-react";
 import { ink } from "./icons";
+import { useI18n } from "./i18n";
 
 interface Props {
   host: string;
@@ -11,6 +12,7 @@ interface Props {
 }
 
 export default function PasswordPrompt({ host, username, onClose, onSkip, onSubmit }: Props) {
+  const { t } = useI18n();
   const [user, setUser] = useState(username);
   const [password, setPassword] = useState("");
   const [save, setSave] = useState(false);
@@ -30,41 +32,41 @@ export default function PasswordPrompt({ host, username, onClose, onSkip, onSubm
         }}
       >
         <div className="dialog-titlebar">
-          <span>Enter Secure Shell Password</span>
+          <span>{t("pwd.title")}</span>
           <button className="dialog-close" onClick={onClose}>
             <IconX {...ink(16)} />
           </button>
         </div>
         <div className="dialog-body">
           <p className="pwd-note">
-            {user.trim() || "?"}@{host} requires a password.
+            {t("pwd.requires", { user: user.trim() || "?", host })}
             <br />
-            <span>Please enter a password now.</span>
+            <span>{t("pwd.enterNow")}</span>
           </p>
           <label className="form-row">
-            <span>Username:</span>
+            <span>{t("pwd.username")}</span>
             <input value={user} onChange={(e) => setUser(e.target.value)} />
           </label>
           <label className="form-row">
-            <span>Password:</span>
+            <span>{t("pwd.password")}</span>
             <input type="password" value={password} autoFocus onChange={(e) => setPassword(e.target.value)} />
           </label>
           <div className="check-rows">
             <label>
               <input type="checkbox" checked={save} onChange={(e) => setSave(e.target.checked)} />
-              Save password
+              {t("pwd.save")}
             </label>
           </div>
         </div>
         <div className="dialog-footer">
           <button className="btn btn-primary" disabled={!user.trim() || !password} onClick={ok}>
-            OK
+            {t("pwd.ok")}
           </button>
           <button className="btn" onClick={onClose}>
-            Cancel
+            {t("pwd.cancel")}
           </button>
           <button className="btn" onClick={() => onSkip(user.trim())}>
-            Skip
+            {t("pwd.skip")}
           </button>
         </div>
       </div>

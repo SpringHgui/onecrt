@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import MenuBar, { MenuDef } from "./MenuBar";
+import { useI18n } from "./i18n";
 import "./menu.css";
 
 interface Props {
@@ -50,6 +51,7 @@ const CloseGlyph = () => (
 
 /// 自定义标题栏：菜单 + 窗口标题 + 窗口控制按钮，取代原生标题栏
 export default function TitleBar({ menus, menuVisible, title }: Props) {
+  const { t } = useI18n();
   const [maximized, setMaximized] = useState(false);
 
   useEffect(() => {
@@ -75,23 +77,23 @@ export default function TitleBar({ menus, menuVisible, title }: Props) {
         {title}
       </div>
       <div className="tb-caption">
-        <button className="tb-btn" title="最小化" aria-label="最小化" onClick={() => run(getCurrentWindow().minimize())}>
+        <button className="tb-btn" title={t("titlebar.minimize")} aria-label={t("titlebar.minimize")} onClick={() => run(getCurrentWindow().minimize())}>
           <span className="tb-glyph">
             <MinGlyph />
           </span>
         </button>
         <button
           className="tb-btn"
-          title={maximized ? "向下还原" : "最大化"}
-          aria-label={maximized ? "向下还原" : "最大化"}
+          title={maximized ? t("titlebar.restore") : t("titlebar.maximize")}
+          aria-label={maximized ? t("titlebar.restore") : t("titlebar.maximize")}
           onClick={() => run(getCurrentWindow().toggleMaximize())}
         >
           <span className="tb-glyph">{maximized ? <RestoreGlyph /> : <MaxGlyph />}</span>
         </button>
         <button
           className="tb-btn close"
-          title="关闭"
-          aria-label="关闭"
+          title={t("titlebar.close")}
+          aria-label={t("titlebar.close")}
           onClick={() => run(getCurrentWindow().close())}
         >
           <span className="tb-glyph">

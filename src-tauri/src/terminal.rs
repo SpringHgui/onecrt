@@ -21,6 +21,9 @@ pub struct OpenArgs {
     pub password: String,
     #[serde(default)]
     pub key_path: String,
+    /// 勾选了的认证方法，按列表顺序尝试；为空回退旧版固定顺序
+    #[serde(default)]
+    pub methods: Vec<String>,
     pub cols: u16,
     pub rows: u16,
 }
@@ -70,42 +73,64 @@ pub(crate) async fn authenticate(
     user: &str,
     password: &str,
     key: Option<PrivateKey>,
+    methods: &[String],
 ) -> Result<()> {
-    if let Some(key) = key {
-        let auth = handle
-            .authenticate_publickey(user, PrivateKeyWithHashAlg::new(Arc::new(key), None))
-            .await
-            .context("公钥认证失败")?;
-        if auth.success() {
-            return Ok(());
-        }
-    }
-    if !password.is_empty() {
-        let auth = handle
-            .authenticate_password(user, password)
-            .await
-            .context("密码认证失败")?;
-        if auth.success() {
-            return Ok(());
-        }
-        // 部分服务器只接受 keyboard-interactive
-        let mut resp = handle
-            .authenticate_keyboard_interactive_start(user, None)
-            .await?;
-        loop {
-            match resp {
-                KeyboardInteractiveAuthResponse::Success => return Ok(()),
-                KeyboardInteractiveAuthResponse::Failure { .. } => break,
-                KeyboardInteractiveAuthResponse::InfoRequest { prompts, .. } => {
-                    let answers = prompts.iter().map(|_| password.to_string()).collect();
-                    resp = handle
-                        .authenticate_keyboard_interactive_respond(answers)
-                        .await?;
+    let legacy = ["PublicKey", "Password", "Keyboard Interactive"].map(str::to_string);
+    let order: &[String] = if methods.is_empty() { &legacy } else { methods };
+    for method in order {
+        match method.as_str() {
+            "PublicKey" => {
+                if let Some(key) = &key {
+                    let auth = handle
+                        .authenticate_publickey(user, PrivateKeyWithHashAlg::new(Arc::new(key.clone()), None))
+                        .await
+                        .context("公钥认证失败")?;
+                    if auth.success() {
+                        return Ok(());
+                    }
                 }
             }
+            "Password" => {
+                if !password.is_empty() {
+                    let auth = handle
+                        .authenticate_password(user, password)
+                        .await
+                        .context("密码认证失败")?;
+                    if auth.success() {
+                        return Ok(());
+                    }
+                }
+            }
+            "Keyboard Interactive" => {
+                // 部分服务器只接受 keyboard-interactive
+                if !password.is_empty() {
+                    let mut resp = handle
+                        .authenticate_keyboard_interactive_start(user, None)
+                        .await?;
+                    loop {
+                        match resp {
+                            KeyboardInteractiveAuthResponse::Success => return Ok(()),
+                            KeyboardInteractiveAuthResponse::Failure { .. } => break,
+                            KeyboardInteractiveAuthResponse::InfoRequest { prompts, .. } => {
+                                let answers = prompts.iter().map(|_| password.to_string()).collect();
+                                resp = handle
+                                    .authenticate_keyboard_interactive_respond(answers)
+                                    .await?;
+                            }
+                        }
+                    }
+                }
+            }
+            _ => {}
         }
     }
     Err(anyhow!("认证失败，请检查用户名、密码或密钥"))
+}
+
+fn expand_key_path(p: &str) -> String {
+    let home = dirs::home_dir().unwrap_or_default();
+    p.replace("~\\", &format!("{}\\", home.display()))
+        .replace("~/", &format!("{}/", home.display()))
 }
 
 pub(crate) fn load_key(key_path: &str) -> Option<PrivateKey> {
@@ -113,13 +138,27 @@ pub(crate) fn load_key(key_path: &str) -> Option<PrivateKey> {
     if p.is_empty() {
         return None;
     }
-    let home = dirs::home_dir().unwrap_or_default();
-    let expanded = p
-        .replace("~\\", &format!("{}\\", home.display()))
-        .replace("~/", &format!("{}/", home.display()));
+    let expanded = expand_key_path(p);
     PrivateKey::read_openssh_file(&expanded)
         .or_else(|_| PrivateKey::read_openssh_file(p))
         .ok()
+}
+
+/// 公钥指纹，供会话属性里的 Public Key Properties 展示
+pub fn fingerprint(key_path: &str) -> Result<String, String> {
+    let p = key_path.trim();
+    if p.is_empty() {
+        return Err("未设置身份文件".into());
+    }
+    let expanded = expand_key_path(p);
+    let key = PrivateKey::read_openssh_file(&expanded)
+        .or_else(|_| PrivateKey::read_openssh_file(p))
+        .map_err(|e| format!("读不了密钥文件: {e}"))?;
+    Ok(format!(
+        "{} {}",
+        key.algorithm(),
+        key.public_key().fingerprint(russh::keys::HashAlg::Sha256)
+    ))
 }
 
 async fn session_logic(
@@ -138,7 +177,7 @@ async fn session_logic(
         let mut handle = client::connect(Arc::new(client::Config::default()), addr.as_str(), ShellHandler)
             .await
             .with_context(|| format!("无法连接到 {addr}"))?;
-        authenticate(&mut handle, &args.username, &args.password, key).await?;
+        authenticate(&mut handle, &args.username, &args.password, key, &args.methods).await?;
 
         let channel = handle.channel_open_session().await?;
         let win = Win {

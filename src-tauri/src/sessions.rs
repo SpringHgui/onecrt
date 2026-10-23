@@ -1,6 +1,24 @@
 use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
 
+/// 认证方法的一项：列表里的顺序即连接时的尝试顺序，enabled 为勾选状态
+#[derive(Serialize, Deserialize, Clone, Debug, PartialEq)]
+#[serde(rename_all = "camelCase")]
+pub struct AuthMethod {
+    pub method: String,
+    pub enabled: bool,
+}
+
+fn default_auth() -> Vec<AuthMethod> {
+    ["PublicKey", "Password", "Keyboard Interactive"]
+        .into_iter()
+        .map(|method| AuthMethod {
+            method: method.into(),
+            enabled: true,
+        })
+        .collect()
+}
+
 #[derive(Serialize, Deserialize, Clone, Debug)]
 #[serde(rename_all = "camelCase")]
 pub struct SshSession {
@@ -9,11 +27,14 @@ pub struct SshSession {
     pub host: String,
     pub port: u16,
     pub username: String,
+    /// 落盘为 DPAPI 密文，读回时解密；旧版本的明文原样兼容
     #[serde(default)]
     pub password: String,
     /// OpenSSH 私钥文件路径；为空则不启用公钥认证
     #[serde(default)]
     pub key_path: String,
+    #[serde(default = "default_auth")]
+    pub auth: Vec<AuthMethod>,
 }
 
 #[derive(Serialize, Deserialize, Clone, Debug)]
@@ -29,7 +50,7 @@ pub enum Node {
     Session(SshSession),
 }
 
-#[derive(Serialize, Deserialize, Default, Debug)]
+#[derive(Serialize, Deserialize, Default, Clone, Debug)]
 pub struct SessionTree {
     #[serde(default)]
     pub sessions: Vec<Node>,
@@ -69,6 +90,7 @@ fn node(id: &str, name: &str, host: &str) -> Node {
         username: "root".into(),
         password: String::new(),
         key_path: String::new(),
+        auth: default_auth(),
     })
 }
 
@@ -159,6 +181,88 @@ fn seed() -> SessionTree {
     }
 }
 
+/// 口令用 DPAPI 落盘加密：密钥由当前 Windows 登录用户持有，sessions.json 被拷走也只是密文。
+/// 解不开（换机器/换用户/配置文件损坏）时按无口令处理，连接时弹框补凭据。
+mod secret {
+    use windows::Win32::Foundation::{LocalFree, HLOCAL};
+    use windows::Win32::Security::Cryptography::{CryptProtectData, CryptUnprotectData, CRYPT_INTEGER_BLOB};
+
+    const PREFIX: &str = "dpapi:";
+
+    fn hex(bytes: &[u8]) -> String {
+        bytes.iter().map(|b| format!("{b:02x}")).collect()
+    }
+
+    fn unhex(text: &str) -> Option<Vec<u8>> {
+        if text.len() % 2 != 0 {
+            return None;
+        }
+        (0..text.len() / 2)
+            .map(|i| u8::from_str_radix(&text[i * 2..i * 2 + 2], 16).ok())
+            .collect()
+    }
+
+    pub fn protect(plain: &str) -> Result<String, String> {
+        let mut bytes = plain.as_bytes().to_vec();
+        let input = CRYPT_INTEGER_BLOB {
+            cbData: bytes.len() as u32,
+            pbData: bytes.as_mut_ptr(),
+        };
+        let mut output = CRYPT_INTEGER_BLOB {
+            cbData: 0,
+            pbData: std::ptr::null_mut(),
+        };
+        unsafe {
+            CryptProtectData(&input, None, None, None, None, 0, &mut output)
+                .map_err(|e| format!("口令加密失败: {e}"))?;
+            let blob = std::slice::from_raw_parts(output.pbData, output.cbData as usize).to_vec();
+            LocalFree(Some(HLOCAL(output.pbData as *mut _)));
+            Ok(format!("{PREFIX}{}", hex(&blob)))
+        }
+    }
+
+    pub fn is_protected(stored: &str) -> bool {
+        stored.starts_with(PREFIX)
+    }
+
+    pub fn unprotect(stored: &str) -> String {
+        let Some(rest) = stored.strip_prefix(PREFIX) else {
+            return stored.to_string();
+        };
+        let Some(mut bytes) = unhex(rest) else {
+            return String::new();
+        };
+        let input = CRYPT_INTEGER_BLOB {
+            cbData: bytes.len() as u32,
+            pbData: bytes.as_mut_ptr(),
+        };
+        let mut output = CRYPT_INTEGER_BLOB {
+            cbData: 0,
+            pbData: std::ptr::null_mut(),
+        };
+        unsafe {
+            if CryptUnprotectData(&input, None, None, None, None, 0, &mut output).is_err() {
+                return String::new();
+            }
+            let plain =
+                String::from_utf8_lossy(std::slice::from_raw_parts(output.pbData, output.cbData as usize))
+                    .into_owned();
+            LocalFree(Some(HLOCAL(output.pbData as *mut _)));
+            plain
+        }
+    }
+}
+
+fn map_passwords(nodes: &mut [Node], f: &(impl Fn(&str) -> Result<String, String>)) -> Result<(), String> {
+    for n in nodes.iter_mut() {
+        match n {
+            Node::Folder { children, .. } => map_passwords(children, f)?,
+            Node::Session(s) => s.password = f(&s.password)?,
+        }
+    }
+    Ok(())
+}
+
 fn store_path() -> Result<PathBuf, String> {
     let base = dirs::config_dir().ok_or_else(|| "无法获取配置目录".to_string())?;
     let dir = base.join("shellx");
@@ -172,12 +276,22 @@ pub fn load_tree() -> Result<SessionTree, String> {
         save_tree(&seed())?;
     }
     let text = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
-    serde_json::from_str(&text).map_err(|e| format!("会话文件损坏: {e}"))
+    let mut tree: SessionTree = serde_json::from_str(&text).map_err(|e| format!("会话文件损坏: {e}"))?;
+    map_passwords(&mut tree.sessions, &|p| Ok(secret::unprotect(p)))?;
+    Ok(tree)
 }
 
 pub fn save_tree(tree: &SessionTree) -> Result<(), String> {
     let path = store_path()?;
-    let text = serde_json::to_string_pretty(tree).map_err(|e| e.to_string())?;
+    let mut encrypted = tree.clone();
+    map_passwords(&mut encrypted.sessions, &|p| {
+        if p.is_empty() || secret::is_protected(p) {
+            Ok(p.to_string())
+        } else {
+            secret::protect(p)
+        }
+    })?;
+    let text = serde_json::to_string_pretty(&encrypted).map_err(|e| e.to_string())?;
     std::fs::write(&path, text).map_err(|e| e.to_string())
 }
 
@@ -309,5 +423,31 @@ mod tests {
     #[test]
     fn 损坏的命令文件会报错而不是清空() {
         assert!(parse_commands("{ not json").is_err());
+    }
+
+    #[test]
+    fn 口令落盘为dpapi密文且能解回原文() {
+        let encrypted = secret::protect("p@ss 中文").unwrap();
+        assert!(secret::is_protected(&encrypted));
+        assert_eq!(secret::unprotect(&encrypted), "p@ss 中文");
+    }
+
+    #[test]
+    fn 旧版明文口令原样读回() {
+        assert!(!secret::is_protected("plain"));
+        assert_eq!(secret::unprotect("plain"), "plain");
+    }
+
+    #[test]
+    fn 解不开的密文按无口令处理() {
+        assert_eq!(secret::unprotect("dpapi:zz"), "");
+        assert_eq!(secret::unprotect("dpapi:00ff"), "");
+    }
+
+    #[test]
+    fn 缺auth字段的旧会话读出默认认证列表() {
+        let json = r#"{"id":"s","name":"n","host":"h","port":22,"username":"u"}"#;
+        let s: SshSession = serde_json::from_str(json).unwrap();
+        assert_eq!(s.auth, default_auth());
     }
 }

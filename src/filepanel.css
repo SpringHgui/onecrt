@@ -287,35 +287,6 @@
   white-space: nowrap;
 }
 
-.fp-prog-name {
-  max-width: 45%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  color: var(--text);
-}
-
-.fp-prog-track {
-  flex: 1;
-  height: 4px;
-  border-radius: 2px;
-  background: var(--bg-pill);
-  overflow: hidden;
-}
-
-.fp-prog-track i {
-  display: block;
-  height: 100%;
-  background: var(--accent);
-  transition: width 0.15s linear;
-}
-
-.fp-prog-pct {
-  width: 34px;
-  text-align: right;
-  font-variant-numeric: tabular-nums;
-}
-
 .fp-error {
   flex: none;
   padding: 5px 8px;

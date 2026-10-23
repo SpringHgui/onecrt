@@ -8,11 +8,6 @@ interface Props {
 }
 
 /// 行内改名：聚焦全选，Enter 提交 / Esc 取消，失焦等同取消
-const log = (s: string) => {
-  const w = window as unknown as { __ieLog?: string[] };
-  (w.__ieLog ??= []).push(s);
-};
-
 export default function InlineEdit({ initial, onCommit, onCancel, className }: Props) {
   const ref = useRef<HTMLInputElement>(null);
   const done = useRef(false);
@@ -25,6 +20,8 @@ export default function InlineEdit({ initial, onCommit, onCancel, className }: P
     el.focus();
     const i = el.value.lastIndexOf(".");
     el.setSelectionRange(i > 0 ? i : 0, el.value.length);
+    // 树是可滚动的：占位行落在折叠区外时用户看不见，会以为"点了没反应"
+    el.scrollIntoView({ block: "nearest" });
   }, []);
 
   return (
@@ -37,19 +34,19 @@ export default function InlineEdit({ initial, onCommit, onCancel, className }: P
       onDoubleClick={(e) => e.stopPropagation()}
       onClick={(e) => e.stopPropagation()}
       onKeyDown={(e) => {
-        log(`key:${e.key}`);
         if (e.key === "Enter") {
           done.current = true;
-          log("commit");
           commit(e.currentTarget.value.trim());
         } else if (e.key === "Escape") {
+          // flexlayout 把 Escape 绑成"收起 overlay 面板"（document 上的原生监听）。
+          // 不拦下来，取消改名的同时整个面板会被关掉
+          e.preventDefault();
+          e.stopPropagation();
           done.current = true;
-          log("cancel");
           cancel();
         }
       }}
       onBlur={() => {
-        log(`blur done=${done.current}`);
         if (!done.current) cancel();
       }}
     />

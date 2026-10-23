@@ -13,7 +13,9 @@ import {
 } from "@tabler/icons-react";
 import { ink } from "./icons";
 import InlineEdit from "./InlineEdit";
+import PanelPin from "./PanelPin";
 import { CommandNode, SavedCommand, isCommandFolder } from "./types";
+import { useI18n } from "./i18n";
 
 interface Props {
   nodes: CommandNode[];
@@ -23,6 +25,9 @@ interface Props {
   renamingId: string | null;
   hasClipboard: boolean;
   canSend: boolean;
+  /// 标题栏右上角的图钉：钉住=常驻，取消=自动隐藏
+  pinned: boolean;
+  onTogglePin(): void;
   filter: string;
   onFilter(v: string): void;
   onToggle(id: string): void;
@@ -39,6 +44,8 @@ interface Props {
   onContextMenu(node: CommandNode, e: React.MouseEvent): void;
   onRenameCommit(node: CommandNode, name: string): void;
   onRenameCancel(): void;
+  /// 标题栏作为拖拽把手（flexlayout 拖放），由 App 注入
+  drag?: React.HTMLAttributes<HTMLDivElement>;
 }
 
 function render(nodes: CommandNode[], depth: number, props: Props): React.ReactNode {
@@ -104,6 +111,7 @@ function render(nodes: CommandNode[], depth: number, props: Props): React.ReactN
 }
 
 export default function CommandManager(props: Props) {
+  const { t } = useI18n();
   const selected: CommandNode | null = props.selectedId
     ? (function find(ns: CommandNode[]): CommandNode | null {
         for (const n of ns) {
@@ -120,47 +128,58 @@ export default function CommandManager(props: Props) {
 
   return (
     <div className="cmd-manager">
-      <div className="sidebar-header">
-        <span>Command Manager</span>
+      <div className="sidebar-header" {...props.drag}>
+        <span>{t("cm.title")}</span>
+        <PanelPin pinned={props.pinned} onToggle={props.onTogglePin} />
       </div>
       <div className="sidebar-toolbar">
         <button
-          title="发送命令"
+          title={t("cm.send")}
           disabled={!selectedCmd || !props.canSend}
           onClick={() => selectedCmd && props.onSend(selectedCmd)}
         >
           <IconChevronRight {...ink(16)} />
         </button>
-        <button title="新建命令" onClick={props.onNewCommand}>
+        <button title={t("cm.newCommand")} onClick={props.onNewCommand}>
           <IconPencil {...ink(16)} />
         </button>
-        <button title="新建文件夹" onClick={props.onNewFolder}>
+        <button title={t("cm.newFolder")} onClick={props.onNewFolder}>
           <IconFolderPlus {...ink(16)} />
         </button>
-        <button title="剪切" disabled={!selected} onClick={props.onCut}>
+        <button title={t("cm.cut")} disabled={!selected} onClick={props.onCut}>
           <IconScissors {...ink(16)} />
         </button>
-        <button title="复制" disabled={!selected} onClick={props.onCopy}>
+        <button title={t("cm.copy")} disabled={!selected} onClick={props.onCopy}>
           <IconCopy {...ink(16)} />
         </button>
-        <button title="粘贴" disabled={!props.hasClipboard} onClick={props.onPaste}>
+        <button title={t("cm.paste")} disabled={!props.hasClipboard} onClick={props.onPaste}>
           <IconClipboard {...ink(16)} />
         </button>
-        <button title="删除" disabled={!selected} onClick={props.onDelete}>
+        <button title={t("cm.delete")} disabled={!selected} onClick={props.onDelete}>
           <IconTrash {...ink(16)} />
         </button>
-        <button title="属性" disabled={!selected} onClick={props.onProperties}>
+        <button title={t("cm.properties")} disabled={!selected} onClick={props.onProperties}>
           <IconSettings {...ink(16)} />
         </button>
       </div>
       <input
         className="filter-input"
-        placeholder="Filter by folder/command name"
+        placeholder={t("cm.filter")}
         value={props.filter}
         onChange={(e) => props.onFilter(e.target.value)}
       />
       <div className="sidebar-tree">
-        <div className="session-tree">{render(props.nodes, 0, props)}</div>
+        <div
+          className="session-tree"
+          tabIndex={0}
+          onKeyDown={(e) => {
+            if (e.key !== "Delete" || (e.target as HTMLElement).tagName === "INPUT") return;
+            e.preventDefault();
+            props.onDelete();
+          }}
+        >
+          {render(props.nodes, 0, props)}
+        </div>
       </div>
     </div>
   );

@@ -8,7 +8,8 @@ export type ViewKey =
   | "statusBar"
   | "sessionManager"
   | "cmdManager"
-  | "filePanel";
+  | "filePanel"
+  | "transfers";
 
 export type ViewState = Record<ViewKey, boolean>;
 
@@ -27,6 +28,8 @@ export const DEFAULT_VIEW: ViewState = {
   sessionManager: true,
   cmdManager: true,
   filePanel: false,
+  /// 传输面板平时不占地方，开始传输时由 App 自动放出来
+  transfers: false,
 };
 
 function loadView(): ViewState {

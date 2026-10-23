@@ -88,7 +88,7 @@ body,
 }
 
 body {
-  font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  font-family: "Microsoft YaHei", "微软雅黑", "Segoe UI", system-ui, sans-serif;
   font-size: 13px;
   color: var(--text);
   background: var(--bg);
@@ -492,15 +492,131 @@ body {
   background: var(--bg-selected);
 }
 
-.auth-props {
-  margin: 0 0 12px 94px;
-  padding: 10px;
-  border: 1px dashed var(--border-strong);
-  border-radius: 8px;
+.auth-item.sel {
+  background: var(--bg-selected);
 }
 
-.auth-props .form-row > span {
-  width: 80px;
+.auth-arrows {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.btn-arrow {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 26px;
+  height: 22px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--field);
+  color: var(--text);
+}
+
+.btn-arrow:hover:not(:disabled) {
+  border-color: var(--accent);
+}
+
+.btn-arrow:disabled {
+  opacity: 0.4;
+}
+
+.auth-note {
+  margin: -6px 0 10px 94px;
+}
+
+.props-overlay {
+  z-index: 110;
+}
+
+.props-dialog {
+  width: 430px;
+}
+
+.props-group {
+  margin: 0 0 4px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  color: var(--text);
+}
+
+.props-group legend {
+  padding: 0 6px;
+  color: var(--text-2);
+}
+
+.props-group .form-row {
+  margin-bottom: 8px;
+}
+
+.props-group .form-row:last-child {
+  margin-bottom: 0;
+}
+
+.props-group input[type="password"] {
+  width: 100%;
+  margin-bottom: 8px;
+  padding: 5px 9px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--field);
+  color: var(--text);
+  font-size: 13px;
+}
+
+.props-group input[type="password"]:disabled {
+  color: var(--text-3);
+}
+
+.check-line {
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  margin-bottom: 8px;
+  color: var(--text);
+}
+
+.props-label {
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: var(--text-2);
+}
+
+.props-note {
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+.hint-err {
+  margin-bottom: 6px;
+  font-size: 12px;
+  color: var(--danger-text);
+}
+
+.fp-row {
+  align-items: stretch;
+}
+
+.fp-row textarea {
+  flex: 1;
+  min-width: 0;
+  height: 58px;
+  resize: none;
+  padding: 5px 9px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--field);
+  color: var(--text);
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 12px;
+  user-select: text;
+}
+
+.btn-narrow {
+  min-width: 32px;
+  padding: 5px 8px;
 }
 
 .check-rows {
@@ -574,26 +690,36 @@ body {
   height: 100%;
 }
 
+/* 滚动条三态：指针不在窗口内 → 隐藏滑块；在窗口内 → 3px 细条；悬浮到滑块上 → 5px + 提亮（原样）。
+   槽宽恒定 11px，粗细全靠滑块的透明边框内缩（11-4-4=3 / 11-3-3=5）：槽宽一变，
+   xterm 的 viewport 就会跟着重排、终端字符行数在鼠标进出窗口时被重算。
+   另外不能写 `::-webkit-scrollbar:hover::-webkit-scrollbar-thumb`：lightningcss 压缩
+   "伪类 + 两个 scrollbar 伪元素" 会直接报 Invalid state，构建过不去。 */
 ::-webkit-scrollbar {
   width: 11px;
   height: 11px;
 }
 
-::-webkit-scrollbar-thumb {
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+html:not(.app-mouse-in) ::-webkit-scrollbar-thumb {
+  background: transparent;
+}
+
+html.app-mouse-in ::-webkit-scrollbar-thumb {
   background: var(--border-strong);
-  border: 3px solid transparent;
+  border: 4px solid transparent;
   background-clip: content-box;
   border-radius: 8px;
 }
 
-::-webkit-scrollbar-thumb:hover {
-  background: var(--scroll-hover);
-  border: 3px solid transparent;
-  background-clip: content-box;
-}
-
-::-webkit-scrollbar-track {
-  background: transparent;
+html.app-mouse-in ::-webkit-scrollbar-thumb:hover {
+  /* 只能用 background-color：background 简写会把上面的 background-clip: content-box
+     重置回 border-box，滑块就从 5px 胶囊变成铺满 11px 槽的实心块。 */
+  background-color: var(--scroll-hover);
+  border-width: 3px;
 }
 
 /* ---- 右键菜单 ---- */
@@ -707,4 +833,132 @@ body {
   flex: 1;
   min-height: 0;
   border-left: 0;
+}
+
+/* 面板标题栏右上角的图钉：手感跟各工具栏按钮一致，钉住时点亮 */
+.panel-pin {
+  margin-left: auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: 0;
+  border-radius: var(--radius);
+  background: none;
+  color: var(--text-2);
+  cursor: pointer;
+}
+
+.panel-pin:hover {
+  background: var(--bg-selected);
+  color: var(--text);
+}
+
+.panel-pin[aria-pressed="true"] {
+  color: var(--accent);
+}
+
+/* ---------- 浮窗顶栏（照 VS 的工具窗浮窗） ---------- */
+/* 库的 float header 只有抓手+居中标题，VS 是"标题靠左 + 右侧一排窗口按钮"。
+   按钮由 FloatCaption.tsx portal 进 header；标题居中是库的内联样式，只能 !important 压。 */
+.float-caption-ctl {
+  display: inline-flex;
+  gap: 2px;
+  margin-left: auto;
+}
+
+.flexlayout__float_window_header > div:nth-child(2) {
+  justify-content: flex-start !important;
+}
+
+/* 名字和按钮都上移到窗口顶栏后，面板自己那条标题行在浮窗里就是复读，藏掉。
+   文件/传输面板的顶栏带操作按钮，不在此列。 */
+.flexlayout__float_window .sidebar-header {
+  display: none;
+}
+
+/* 回停靠按钮常亮品牌绿：用户抱怨过"浮起来回不去"，这个入口必须一眼看得见。 */
+.panel-dockback {
+  color: var(--accent);
+}
+
+.panel-dockback:hover {
+  background: var(--bg-selected);
+  color: var(--accent-hover);
+}
+
+/* ---------- 拖放罗盘 ---------- */
+/* VS 工具窗那套：中间一个圆 + 四个箭头，亮哪个就往哪边停靠。
+   位置/尺寸/data-zone 由 App 在 dragover 里直接改 DOM（见 DockCompass），不走 React state。 */
+.dock-compass {
+  position: fixed;
+  z-index: 3000;
+  pointer-events: none;
+}
+
+.dock-compass[hidden] {
+  display: none;
+}
+
+.dock-compass-dial {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 168px;
+  height: 168px;
+  transform: translate(-50%, -50%) scale(var(--k, 1));
+  border-radius: 50%;
+  background: var(--scrim);
+  border: 1px solid var(--border-strong);
+  box-shadow: var(--shadow-ctx);
+}
+
+/* 四个箭头共用一个"向上"的形状，靠 rotate 转到各自方向 */
+.dock-compass-arm {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 42px;
+  height: 44px;
+  margin: -22px 0 0 -21px;
+  background: var(--bg-selected);
+  clip-path: polygon(50% 0%, 100% 38%, 70% 38%, 70% 100%, 30% 100%, 30% 38%, 0% 38%);
+  transition: background 90ms linear;
+}
+
+.dock-compass-arm[data-arm="top"] {
+  transform: translateY(-54px);
+}
+
+.dock-compass-arm[data-arm="bottom"] {
+  transform: translateY(54px) rotate(180deg);
+}
+
+.dock-compass-arm[data-arm="left"] {
+  transform: translateX(-54px) rotate(-90deg);
+}
+
+.dock-compass-arm[data-arm="right"] {
+  transform: translateX(54px) rotate(90deg);
+}
+
+.dock-compass-hub {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: 56px;
+  height: 56px;
+  margin: -28px 0 0 -28px;
+  border-radius: 50%;
+  background: var(--bg-selected);
+  transition: background 90ms linear;
+}
+
+.dock-compass[data-zone="top"] [data-arm="top"],
+.dock-compass[data-zone="right"] [data-arm="right"],
+.dock-compass[data-zone="bottom"] [data-arm="bottom"],
+.dock-compass[data-zone="left"] [data-arm="left"],
+.dock-compass[data-zone="center"] [data-arm="center"] {
+  background: var(--accent);
 }

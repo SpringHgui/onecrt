@@ -4,7 +4,6 @@ import {
   IconClipboard,
   IconCopy,
   IconRepeat,
-  IconDeviceDesktopPlus,
   IconKeyboard,
   IconPrinter,
   IconRefresh,
@@ -12,10 +11,10 @@ import {
   IconTool,
 } from "@tabler/icons-react";
 import { ink } from "./icons";
+import { useI18n } from "./i18n";
 import "./menu.css";
 
 export interface ToolbarActions {
-  newSession(): void;
   /// 用活动标签的参数打开 Quick Connect，没有活动标签时是空白新建
   quickConnect(): void;
   cycleTab(): void;
@@ -30,34 +29,32 @@ export interface ToolbarActions {
 }
 
 export default function Toolbar(a: ToolbarActions) {
+  const { t } = useI18n();
   const dead = a.tabCount === 0;
   return (
     <div className="toolbar">
-      <button title="新建会话" onClick={a.newSession}>
-        <IconDeviceDesktopPlus {...ink(17)} />
-      </button>
-      <button title="快速连接" onClick={a.quickConnect}>
+      <button title={t("tb.newConnect")} onClick={a.quickConnect}>
         <IconBolt {...ink(17)} />
       </button>
-      <button title="切换到下一个标签" disabled={a.tabCount < 2} onClick={a.cycleTab}>
+      <button title={t("tb.nextTab")} disabled={a.tabCount < 2} onClick={a.cycleTab}>
         <IconRepeat {...ink(17)} />
       </button>
-      <button title="重新连接" disabled={dead} onClick={a.reconnect}>
+      <button title={t("tb.reconnect")} disabled={dead} onClick={a.reconnect}>
         <IconRefresh {...ink(17)} />
       </button>
       <span className="tb-sep" />
-      <button title="复制" disabled={dead} onClick={a.copy}>
+      <button title={t("tb.copy")} disabled={dead} onClick={a.copy}>
         <IconCopy {...ink(17)} />
       </button>
-      <button title="粘贴" disabled={dead} onClick={a.paste}>
+      <button title={t("tb.paste")} disabled={dead} onClick={a.paste}>
         <IconClipboard {...ink(17)} />
       </button>
-      <button title="打印" disabled>
+      <button title={t("tb.print")} disabled>
         <IconPrinter {...ink(17)} />
       </button>
       <span className="tb-sep" />
       <button
-        title="文件传输 / SFTP"
+        title={t("tb.fileTransfer")}
         aria-pressed={a.filePanelOpen}
         className={a.filePanelOpen ? "on" : undefined}
         disabled={dead}
@@ -66,13 +63,13 @@ export default function Toolbar(a: ToolbarActions) {
         <IconArrowsTransferUpDown {...ink(17)} />
       </button>
       <span className="tb-sep" />
-      <button title="会话选项" disabled={dead} onClick={a.sessionOptions}>
+      <button title={t("tb.sessionOptions")} disabled={dead} onClick={a.sessionOptions}>
         <IconSettings {...ink(17)} />
       </button>
-      <button title="键盘映射" disabled>
+      <button title={t("tb.keyMapping")} disabled>
         <IconKeyboard {...ink(17)} />
       </button>
-      <button title="端口转发 / 隧道" disabled>
+      <button title={t("tb.portForward")} disabled>
         <IconTool {...ink(17)} />
       </button>
     </div>

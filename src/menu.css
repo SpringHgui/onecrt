@@ -194,6 +194,47 @@
   background: var(--border);
 }
 
+/* 正在传输的那一条；没有传输时整段不渲染 */
+.statusbar .sb-transfer {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.statusbar .sb-dir {
+  display: inline-flex;
+  align-items: center;
+  color: var(--accent);
+}
+
+.statusbar .sb-tname {
+  max-width: 180px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--text);
+}
+
+.statusbar .sb-track {
+  width: 90px;
+  height: 4px;
+  border-radius: 2px;
+  background: var(--bg-pill);
+  overflow: hidden;
+}
+
+.statusbar .sb-track i {
+  display: block;
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.15s linear;
+}
+
+.statusbar .sb-tpct,
+.statusbar .sb-trate {
+  font-variant-numeric: tabular-nums;
+}
+
 /* ---------- 关于 ---------- */
 .dialog-sm {
   width: 380px;

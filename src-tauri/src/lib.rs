@@ -163,6 +163,16 @@ async fn local_rename(path: String, name: String) -> Result<(), String> {
     files::local_rename(path, name).await
 }
 
+#[tauri::command]
+fn key_fingerprint(path: String) -> Result<String, String> {
+    terminal::fingerprint(&path)
+}
+
+#[tauri::command]
+fn pick_key_file() -> Option<String> {
+    rfd::FileDialog::new().pick_file().map(|p| p.to_string_lossy().into_owned())
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -193,7 +203,9 @@ pub fn run() {
             local_list,
             local_mkdir,
             local_remove,
-            local_rename
+            local_rename,
+            key_fingerprint,
+            pick_key_file
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

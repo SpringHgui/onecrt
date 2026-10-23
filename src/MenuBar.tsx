@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import { IconX } from "@tabler/icons-react";
 import { ink } from "./icons";
 import ContextMenu, { MenuItem } from "./ContextMenu";
+import { useI18n } from "./i18n";
 import "./menu.css";
 
 export interface MenuDef {
@@ -130,11 +131,12 @@ export function useMenuShortcuts(h: ShortcutHandlers) {
 }
 
 export function AboutDialog({ version, onClose }: { version: string; onClose(): void }) {
+  const { t } = useI18n();
   return (
     <div className="dialog-overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="dialog dialog-sm">
         <div className="dialog-titlebar">
-          <span>关于 ShellX</span>
+          <span>{t("about.title")}</span>
           <button className="dialog-close" onClick={onClose}>
             <IconX {...ink(16)} />
           </button>
@@ -143,14 +145,12 @@ export function AboutDialog({ version, onClose }: { version: string; onClose(): 
           <div className="about-line">
             <b>ShellX</b> {version}
           </div>
-          <div className="hint">
-            跨平台 SSH 客户端：Tauri 2 + Rust（russh）+ React + xterm.js。
-          </div>
-          <div className="hint">会话与命令保存在 %APPDATA%\shellx\，口令明文存储，仅面向内网运维。</div>
+          <div className="hint">{t("about.desc")}</div>
+          <div className="hint">{t("about.note")}</div>
         </div>
         <div className="dialog-footer">
           <button className="btn btn-primary" onClick={onClose}>
-            确定
+            {t("common.ok")}
           </button>
         </div>
       </div>

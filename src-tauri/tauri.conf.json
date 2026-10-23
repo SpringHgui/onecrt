@@ -19,7 +19,8 @@
         "minHeight": 560,
         "decorations": false,
         "theme": "Dark",
-        "backgroundColor": "#222426"
+        "backgroundColor": "#222426",
+        "dragDropEnabled": false
       }
     ],
     "security": {

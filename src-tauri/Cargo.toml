@@ -29,6 +29,8 @@ anyhow = "1"
 dirs = "6"
 russh-sftp = "3.0.1"
 arboard = "3.6"
+windows = { version = "0.62", features = ["Win32_Security_Cryptography"] }
+rfd = "0.15"
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

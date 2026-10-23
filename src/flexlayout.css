@@ -30,6 +30,8 @@
   --flexlayout-color-edge-icon: var(--text-2);
   --flexlayout-color-edge-marker: var(--border-strong);
   --flexlayout-color-border-tab-unselected: var(--text-2);
+  /* VS 的边条是平面的：没滑出的条目不带底色块，只有文字变灰 */
+  --flexlayout-color-border-tab-unselected-background: transparent;
   --flexlayout-color-tab-unselected: var(--text-2);
 
   /* 拖放落点提示走品牌绿，别用库默认的浅蓝/浅绿 */
@@ -38,7 +40,7 @@
   --flexlayout-color-drag1-background: rgba(39, 189, 81, 0.16);
   --flexlayout-color-drag2-background: rgba(39, 189, 81, 0.1);
 
-  --flexlayout-font-family: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --flexlayout-font-family: "Microsoft YaHei", "微软雅黑", "Segoe UI", system-ui, sans-serif;
   --flexlayout-font-size: 13px;
   --flexlayout-splitter-size: 5px;
 }
@@ -48,13 +50,60 @@
   font-size: 12px;
 }
 
+/* 自动隐藏的边条照 VS：条目之间只有一条分隔线，悬停/滑出中整格提亮。
+   条的厚度由库按 .flexlayout__border_sizer 的量（上下内边距 + 字号）测出来，
+   这里改条目内边距不会连带把条撑粗，因为测厚用的是那个探针而不是条目。 */
+.workspace .flexlayout__border_button {
+  position: relative;
+  margin: 0;
+  padding: 5px 7px;
+  gap: 6px;
+}
+
+.workspace .flexlayout__border_button + .flexlayout__border_button::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto auto 0;
+  width: 100%;
+  height: 1px;
+  background: var(--line);
+}
+
+/* 横排的上/下边：分隔线画在条目左侧 */
+.workspace .flexlayout__border_top .flexlayout__border_button + .flexlayout__border_button::before,
+.workspace .flexlayout__border_bottom .flexlayout__border_button + .flexlayout__border_button::before {
+  inset: 0 auto 0 -1px;
+  width: 1px;
+  height: 100%;
+}
+
+/* 悬停/滑出中：整格提亮，文字用主文本色（库默认只改文字色，竖条上看不出哪格开着） */
+@media (hover: hover) {
+  .workspace .flexlayout__border_button:hover {
+    background: var(--bg-hover);
+  }
+}
+
+.workspace .flexlayout__border_button--selected {
+  background: var(--bg-selected);
+  color: var(--text);
+  font-weight: 600;
+}
+
+/* 钉住宿主的页签条在底部（adoptDockTabset 把 tabLocation 翻成 bottom），
+   库自带的工具按钮（浮动等）要顶到条的最右端才和 VS 一致；库默认紧跟在标签后面。 */
+.workspace .flexlayout__tabset_tabbar_outer_bottom .flexlayout__tab_toolbar {
+  margin-left: auto;
+}
+
 .workspace .flexlayout__tab_button--selected {
   font-weight: 600;
 }
 
 /* 终端标签页的状态点在 leading 槽里，选中态加粗即可 */
 
-/* 钉住态用品牌色点亮，一眼能看出这块面板是常驻还是自动隐藏 */
-.workspace .pin-toggle[aria-pressed="true"] {
-  color: var(--accent);
+/* 罗盘出现时收掉库那个纯矩形落点框：中心区里两套指示叠在一起只会互相干扰。
+   库是把 visibility 写成内联样式的，所以要 !important。四条边和浮窗的落点框照旧保留。 */
+.workspace:has(.dock-compass:not([hidden])) .flexlayout__outline_rect {
+  visibility: hidden !important;
 }
