@@ -453,12 +453,21 @@ mod tests {
     }
 
     #[test]
-    fn local_parent_stops_at_drive_root() {
-        // 盘符根的 parent 会指回自己；空串是前端置灰「上一级」的信号
+    fn local_parent_stops_at_root() {
+        // 根（盘符根 / 斜杠根）的 parent 会指回自己；空串是前端置灰「上一级」的信号
         assert_eq!(local_parent(""), "");
-        assert_eq!(local_parent("C:\\Users\\Sprin"), "C:\\Users");
-        assert_eq!(local_parent("C:\\Users"), "C:\\");
-        assert_eq!(local_parent("C:\\"), "");
+        #[cfg(windows)]
+        {
+            assert_eq!(local_parent("C:\\Users\\Sprin"), "C:\\Users");
+            assert_eq!(local_parent("C:\\Users"), "C:\\");
+            assert_eq!(local_parent("C:\\"), "");
+        }
+        #[cfg(not(windows))]
+        {
+            assert_eq!(local_parent("/srv/app"), "/srv");
+            assert_eq!(local_parent("/srv"), "/");
+            assert_eq!(local_parent("/"), "");
+        }
     }
 
     #[test]
