@@ -145,3 +145,21 @@
   color: var(--text-3);
   font-size: 12px;
 }
+
+/* ---- 嵌在文件面板底部的形态 ---- */
+/* 窗口身份归文件面板，这里只留一条窄标题行；九列在 460px 的边栏里放不下，
+   收窄成 方向/文件/进度/%/状态，大小、速率、用时进行的 title 提示（运行中的也还在状态栏）。 */
+.tp-bar--slim {
+  height: 24px;
+  border-bottom: 0;
+}
+
+.tp-bar--slim button {
+  width: 22px;
+  height: 20px;
+}
+
+.transferpanel--embedded .tp-head,
+.transferpanel--embedded .tp-row {
+  grid-template-columns: 18px minmax(0, 1fr) minmax(48px, 84px) 30px 44px;
+}

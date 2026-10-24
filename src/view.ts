@@ -9,7 +9,8 @@ export type ViewKey =
   | "sessionManager"
   | "cmdManager"
   | "filePanel"
-  | "transfers";
+  | "transfers"
+  | "perfPanel";
 
 export type ViewState = Record<ViewKey, boolean>;
 
@@ -28,8 +29,10 @@ export const DEFAULT_VIEW: ViewState = {
   sessionManager: true,
   cmdManager: true,
   filePanel: false,
-  /// 传输面板平时不占地方，开始传输时由 App 自动放出来
-  transfers: false,
+  /// 传输区固定在文件面板底部，跟着文件面板一起出来，默认就显
+  transfers: true,
+  /// 性能面板要等连上目标机才有数据，默认不收出来
+  perfPanel: false,
 };
 
 function loadView(): ViewState {

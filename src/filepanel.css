@@ -269,6 +269,35 @@
   font-size: 12px;
 }
 
+/* 文件区与底部传输区之间的分隔条：5px 命中区里画 1px 线，和布局分隔条一个手感 */
+.fp-split {
+  position: relative;
+  flex: none;
+  height: 5px;
+  cursor: row-resize;
+  z-index: 1;
+}
+
+.fp-split::before,
+.fp-split:hover::before,
+.fp-split--drag::before {
+  content: "";
+  position: absolute;
+  inset: 2px 0;
+  background: var(--line);
+}
+
+.fp-split:hover::before,
+.fp-split--drag::before {
+  background: var(--border-strong);
+}
+
+.fp-transfers {
+  flex: none;
+  display: flex;
+  min-height: 0;
+}
+
 .fp-foot {
   flex: none;
   display: flex;

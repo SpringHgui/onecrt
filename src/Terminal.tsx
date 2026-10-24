@@ -53,6 +53,11 @@ function xtermTheme() {
   };
 }
 
+// 没有回滚内容时滑块占满整条 1px 槽，紧贴面板分隔线看着像终端多了一圈边框，所以只在真能滚时画
+function syncScrollable(host: HTMLElement, term: XTerm) {
+  host.classList.toggle("terminal-host--scrollable", term.buffer.active.baseY > 0);
+}
+
 export default function Terminal({ theme, fontSize, onReady, onData, onResize, apiRef: setApi }: Props) {
   const hostRef = useRef<HTMLDivElement>(null);
   const termRef = useRef<XTerm | null>(null);
@@ -141,6 +146,11 @@ export default function Terminal({ theme, fontSize, onReady, onData, onResize, a
     term.onResize(({ cols, rows }) => cbRef.current.onResize(cols, rows));
     // term.paste() 的内容也是从 onData 出去的，别再另挂 paste 监听，否则会贴两遍
 
+    const sync = () => syncScrollable(host, term);
+    term.onWriteParsed(sync);
+    term.onScroll(sync);
+    sync();
+
     const notify = () => cbRef.current.onReady({ cols: term.cols, rows: term.rows });
     if (!readyRef.current) {
       readyRef.current = true;
@@ -155,6 +165,7 @@ export default function Terminal({ theme, fontSize, onReady, onData, onResize, a
       // 面板隐藏时宿主是 0x0，FitAddon 会据此算出 2x1 并 resize 到 PTY，切回来才恢复
       if (!host.clientWidth || !host.clientHeight) return;
       fit.fit();
+      sync();
       notify();
     };
     const ro = new ResizeObserver(() => {
@@ -173,7 +184,7 @@ export default function Terminal({ theme, fontSize, onReady, onData, onResize, a
     };
   }, []);
 
-  // App 先更新 data-theme 再重渲染，此时读到的变量已是新主题的值
+  // data-theme 由 App 在渲染阶段写好，这里读到的已是新主题的变量值
   useEffect(() => {
     const term = termRef.current;
     if (term) term.options.theme = xtermTheme();
@@ -188,6 +199,7 @@ export default function Terminal({ theme, fontSize, onReady, onData, onResize, a
     term.options.fontSize = fontSize;
     if (host?.clientWidth && host?.clientHeight) {
       fit.fit();
+      syncScrollable(host, term);
       cbRef.current.onReady({ cols: term.cols, rows: term.rows });
     }
   }, [fontSize]);

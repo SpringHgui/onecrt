@@ -20,6 +20,7 @@ import { ink } from "./icons";
 import ConfirmDialog from "./ConfirmDialog";
 import InlineEdit from "./InlineEdit";
 import PanelPin from "./PanelPin";
+import TransferPanel from "./TransferPanel";
 import { ConnectParams } from "./QuickConnect";
 import { enabledMethods } from "./types";
 import { beginTransfer, endTransfer, reportTransfer, useTransferActivity, type TransferDir } from "./transfers";
@@ -92,8 +93,10 @@ interface Props {
   tabId: string | null;
   params: ConnectParams | null;
   onClose(): void;
-  /// 传输开始时通知 App 放出底部的传输面板
+  /// 传输开始时通知 App：文件面板（连同底部的传输区）要放出来
   onTransferStart?(): void;
+  /// 底部传输区的显隐，跟着视图菜单的"传输面板"开关走
+  transfersOpen?: boolean;
   /// 顶栏右上角的图钉：钉住=常驻，取消=自动隐藏
   pinned?: boolean;
   onTogglePin?(): void;
@@ -101,7 +104,21 @@ interface Props {
   drag?: React.HTMLAttributes<HTMLDivElement>;
 }
 
-export default function FilePanel({ tabId, params, onClose, onTransferStart, pinned, onTogglePin, drag }: Props) {
+/// 底部传输区的默认/最小高度
+const TP_H = "shellx.transfersH";
+const TP_MIN = 76;
+const TP_DEFAULT = 132;
+
+export default function FilePanel({
+  tabId,
+  params,
+  onClose,
+  onTransferStart,
+  transfersOpen,
+  pinned,
+  onTogglePin,
+  drag,
+}: Props) {
   const { t } = useI18n();
   const [local, setLocal] = useState<Side>(emptySide);
   const [remote, setRemote] = useState<Side>(emptySide);
@@ -117,8 +134,40 @@ export default function FilePanel({ tabId, params, onClose, onTransferStart, pin
   const [confirmDel, setConfirmDel] = useState<{ entry: Entry; side: "local" | "remote" } | null>(null);
   /// 本地侧"快速访问"下拉（常用文件夹 + 盘符），null 表示没展开
   const [quick, setQuick] = useState<Entry[] | null>(null);
+  /// 底部传输区的高度，拖 .fp-split 改，落盘记住
+  const [tpH, setTpH] = useState(() => {
+    const n = Number(localStorage.getItem(TP_H));
+    return Number.isFinite(n) && n >= TP_MIN ? n : TP_DEFAULT;
+  });
+  const rootRef = useRef<HTMLDivElement>(null);
+  const splitRef = useRef<HTMLDivElement>(null);
   const lseq = useRef(0);
   const rseq = useRef(0);
+
+  const startSplitDrag = (e: React.PointerEvent) => {
+    e.preventDefault();
+    splitRef.current?.classList.add("fp-split--drag");
+    const y0 = e.clientY;
+    const h0 = tpH;
+    const room = (rootRef.current?.clientHeight ?? window.innerHeight) - 150;
+    let h = h0;
+    const move = (ev: PointerEvent) => {
+      h = Math.round(Math.min(Math.max(TP_MIN, room), h0 + (y0 - ev.clientY)));
+      setTpH(h);
+    };
+    const up = () => {
+      window.removeEventListener("pointermove", move);
+      window.removeEventListener("pointerup", up);
+      splitRef.current?.classList.remove("fp-split--drag");
+      try {
+        localStorage.setItem(TP_H, String(h));
+      } catch (err) {
+        console.error(TP_H, err);
+      }
+    };
+    window.addEventListener("pointermove", move);
+    window.addEventListener("pointerup", up);
+  };
 
   const showErr = useCallback((e: unknown) => setError(String(e)), []);
 
@@ -407,7 +456,7 @@ export default function FilePanel({ tabId, params, onClose, onTransferStart, pin
         : "";
 
   return (
-    <div className="filepanel">
+    <div className="filepanel" ref={rootRef}>
       <div className="fp-bar" {...drag}>
         <button
           title={t("fp.upload")}
@@ -502,7 +551,15 @@ export default function FilePanel({ tabId, params, onClose, onTransferStart, pin
         )}
       </div>
 
-      {/* 进度条不画在这里：传输过程统一显示在底部的传输面板和状态栏 */}
+      {/* 传输区固定在本窗口底部：以前它是独立的工具窗，两栏各占一条边时要来回切页签才看得见进度 */}
+      {transfersOpen && (
+        <>
+          <div className="fp-split" ref={splitRef} onPointerDown={startSplitDrag} />
+          <div className="fp-transfers" style={{ height: tpH }}>
+            <TransferPanel embedded />
+          </div>
+        </>
+      )}
       <div className="fp-foot">
         <span className="fp-status">
           {target.sel

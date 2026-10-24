@@ -20,14 +20,14 @@ export interface ConnectParams {
 interface Props {
   initial?: Partial<ConnectParams>;
   showName?: boolean;
-  title?: string;
+  title: string;
   onClose(): void;
   onConnect(p: ConnectParams, saveSession: boolean): void;
 }
 
 const PROTOCOLS = ["SSH2", "SSH1", "Telnet", "Telnet/TLS", "Local Shell", "RDP", "Serial", "TAPI", "Rlogin", "Raw"];
 
-export default function QuickConnect({ initial, showName, title = "Quick Connect", onClose, onConnect }: Props) {
+export default function QuickConnect({ initial, showName, title, onClose, onConnect }: Props) {
   const { t } = useI18n();
   const [protocol, setProtocol] = useState("SSH2");
   const [name, setName] = useState(initial?.name ?? "");
@@ -129,7 +129,7 @@ export default function QuickConnect({ initial, showName, title = "Quick Connect
                   onClick={() => setSelected(a.method)}
                 >
                   <input type="checkbox" checked={a.enabled} onChange={() => toggleMethod(a.method)} />
-                  <span>{a.method}</span>
+                  <span>{t(`auth.${a.method}`)}</span>
                 </div>
               ))}
             </div>

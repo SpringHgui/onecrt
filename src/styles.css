@@ -275,7 +275,7 @@ body {
 
 .terminal-host {
   position: absolute;
-  inset: 6px 0 6px 10px;
+  inset: 6px 0;
   /* 拖分隔条时终端要等突发结束才 fit，这期间旧的宽会超出宿主，别让它画到文件面板上 */
   overflow: hidden;
 }
@@ -284,15 +284,42 @@ body {
   position: absolute;
   inset: 0;
   display: flex;
+  flex-direction: column;
   align-items: center;
   justify-content: center;
   color: var(--text-2);
-  font-size: 14px;
 }
 
-.empty-state svg {
-  vertical-align: -2px;
-  margin: 0 2px;
+/* 图标瓦片：比文字更先被看到，给空区一个"这里是终端"的锚点 */
+.empty-glyph {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 44px;
+  height: 44px;
+  margin-bottom: 14px;
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--bg-hover);
+  color: var(--text-2);
+}
+
+.empty-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text);
+}
+
+.empty-desc {
+  margin: 3px 0 16px;
+  font-size: 12px;
+  color: var(--text-3);
+}
+
+.empty-cta {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 /* ---------- 左侧停靠区：Session / Command 两个面板共用 ---------- */
@@ -690,14 +717,16 @@ body {
   height: 100%;
 }
 
-/* 滚动条三态：指针不在窗口内 → 隐藏滑块；在窗口内 → 3px 细条；悬浮到滑块上 → 5px + 提亮（原样）。
-   槽宽恒定 11px，粗细全靠滑块的透明边框内缩（11-4-4=3 / 11-3-3=5）：槽宽一变，
+/* 滚动条三态：指针不在窗口内 → 隐藏滑块；在窗口内 → 2px 细条；悬浮到滑块上 → 4px + 提亮。
+   槽宽恒定 10px，粗细全靠滑块的透明边框内缩（10-4-4=2 / 10-3-3=4）：槽宽一变，
    xterm 的 viewport 就会跟着重排、终端字符行数在鼠标进出窗口时被重算。
+   槽宽必须是偶数：试过 11px 槽 + 4.5px 边框凑 2px，100% DPI 下 Chromium 把半像素
+   边框舍回 4px，量出来还是 3px（.dev/sb_probe.ps1）。
    另外不能写 `::-webkit-scrollbar:hover::-webkit-scrollbar-thumb`：lightningcss 压缩
    "伪类 + 两个 scrollbar 伪元素" 会直接报 Invalid state，构建过不去。 */
 ::-webkit-scrollbar {
-  width: 11px;
-  height: 11px;
+  width: 10px;
+  height: 10px;
 }
 
 ::-webkit-scrollbar-track {
@@ -717,9 +746,31 @@ html.app-mouse-in ::-webkit-scrollbar-thumb {
 
 html.app-mouse-in ::-webkit-scrollbar-thumb:hover {
   /* 只能用 background-color：background 简写会把上面的 background-clip: content-box
-     重置回 border-box，滑块就从 5px 胶囊变成铺满 11px 槽的实心块。 */
+     重置回 border-box，滑块就从 4px 胶囊变成铺满 10px 槽的实心块。 */
   background-color: var(--scroll-hover);
   border-width: 3px;
+}
+
+/* 终端里滚动条只占 1px，不留 10px 槽（右侧带子要和左边对齐）。
+   槽宽 1px 时上面那套 4px/3px 透明边框内缩会把滑块挤成负宽、直接画不出来，
+   所以终端这条改回无边框实心；鼠标进出窗口的显隐仍靠 app-mouse-in。 */
+.terminal-host ::-webkit-scrollbar {
+  width: 1px;
+  height: 1px;
+}
+
+html.app-mouse-in .terminal-host ::-webkit-scrollbar-thumb {
+  border: 0;
+  border-radius: 0;
+}
+
+/* 滚不动的时候滑块占满整条 1px 槽，紧贴面板分隔线看着像终端多了一圈边框，所以只在能滚时画 */
+html.app-mouse-in .terminal-host:not(.terminal-host--scrollable) ::-webkit-scrollbar-thumb {
+  background: transparent;
+}
+
+html.app-mouse-in .terminal-host ::-webkit-scrollbar-thumb:hover {
+  border-width: 0;
 }
 
 /* ---- 右键菜单 ---- */

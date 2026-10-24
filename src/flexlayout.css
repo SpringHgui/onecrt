@@ -42,7 +42,10 @@
 
   --flexlayout-font-family: "Microsoft YaHei", "微软雅黑", "Segoe UI", system-ui, sans-serif;
   --flexlayout-font-size: 13px;
-  --flexlayout-splitter-size: 5px;
+  /* 可见 1px 细线，命中区仍 5px：库用 splitter-active-size 在细线上叠一层居中的透明
+     ::before 当把手，所以收窄线宽不会让分隔条变得抓不住。 */
+  --flexlayout-splitter-size: 1px;
+  --flexlayout-splitter-active-size: 5px;
 }
 
 /* 边缘工具窗口的竖排标签：底色跟面板一致，选中才提亮 */
@@ -94,6 +97,44 @@
    库自带的工具按钮（浮动等）要顶到条的最右端才和 VS 一致；库默认紧跟在标签后面。 */
 .workspace .flexlayout__tabset_tabbar_outer_bottom .flexlayout__tab_toolbar {
   margin-left: auto;
+}
+
+/* 底部页签条被挤窄时：先让各页签平分剩余空间、文字截断出省略号，而不是像库那样
+   把放不下的整个页签收进"…"溢出菜单（看着就像面板丢了）。
+   flex-basis 0 + grow 让份额相等，max-width:max-content 保证空间够用时仍按文字自然宽度排布，
+   不会把两个短页签拉成半屏宽。中心区的顶部页签条不动：那里标签可以很多，溢出菜单是有用的。
+   份额小到放不下"图标 + 5 个汉字"时再由 dockStripFit 打上 dock_strip--icon，退成只剩图标。 */
+.workspace .flexlayout__tabset_tabbar_outer_bottom .flexlayout__mini_scrollbar_container,
+.workspace .flexlayout__tabset_tabbar_outer_bottom .flexlayout__tabset_tabbar_inner {
+  min-width: 0;
+}
+
+.workspace .flexlayout__tabset_tabbar_outer_bottom .flexlayout__tabset_tabbar_inner_tab_container {
+  flex-grow: 1;
+  min-width: 0;
+}
+
+.workspace .flexlayout__tabset_tabbar_outer_bottom .flexlayout__tab_button {
+  flex: 1 1 0;
+  min-width: 0;
+  max-width: max-content;
+}
+
+.workspace .flexlayout__tabset_tabbar_outer_bottom .flexlayout__tab_button_leading {
+  flex: none;
+}
+
+/* 库把文字容器写成 display:flex，字符串子节点成了匿名 flex 项，text-overflow 不生效，
+   要退回块级盒才截得出来。 */
+.workspace .flexlayout__tabset_tabbar_outer_bottom .flexlayout__tab_button_content {
+  display: block;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.workspace .flexlayout__tabset_tabbar_outer_bottom.dock_strip--icon .flexlayout__tab_button_content {
+  display: none;
 }
 
 .workspace .flexlayout__tab_button--selected {

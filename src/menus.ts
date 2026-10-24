@@ -91,7 +91,22 @@ export function buildMenus(c: MenuCtx): MenuDef[] {
           disabled: !c.hasTab,
           onClick: () => c.toggleView("filePanel"),
         },
-        viewToggle(c, "transfers", t("menu.view.transfers")),
+        {
+          label: t("menu.view.perfPanel"),
+          checked: c.view.perfPanel,
+          disabled: !c.hasTab,
+          onClick: () => c.toggleView("perfPanel"),
+        },
+        {
+          label: t("menu.view.transfers"),
+          checked: c.view.transfers,
+          disabled: !c.hasTab,
+          /// 传输区住在文件面板底部：只开它会把文件面板一起开出来，否则点了毫无反应
+          onClick: () => {
+            if (!c.view.transfers && !c.view.filePanel) c.toggleView("filePanel");
+            c.toggleView("transfers");
+          },
+        },
         {},
         {
           label: t("menu.view.language"),

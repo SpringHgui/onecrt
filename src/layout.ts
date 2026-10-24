@@ -1,13 +1,15 @@
 import type { IJsonModel, IJsonRowNode, IJsonTabNode, IJsonTabSetNode } from "flexlayout-react";
+import { t } from "./i18n";
 
 /// 中心 tabset 的固定 id：没有标签页时也要留住它，新连接才知道往哪插
 export const CENTER = "center";
 
-/// 四个工具窗口的 component 与节点 id 同名，菜单开关据此找节点
+/// 工具窗口的 component 与节点 id 同名，菜单开关据此找节点
 export const PANEL_SESSIONS = "sessions";
 export const PANEL_COMMANDS = "commands";
 export const PANEL_FILES = "filePanel";
 export const PANEL_TRANSFERS = "transfers";
+export const PANEL_PERF = "perf";
 
 const STORE = "shellx.layout";
 /// 面板被视图菜单关掉后，它最后停靠的那条边记在这里，下次打开还原到原处
@@ -30,11 +32,10 @@ export const DOCK_TABSET: Record<DockSide, string> = {
 };
 
 /// 各边的默认厚度：左右放树状面板要宽，上下放横向内容要矮。
-/// 下边默认住的是传输面板（标题栏 32 + 表头 22 + 四行记录），够看又不挤终端。
-/// 钉住态用 tabset 的 weight 按同一组数值配比初始宽度。
-const BORDER_SIZE: Record<DockSide, number> = { left: 320, right: 460, top: 240, bottom: 176 };
-const BORDER_MIN: Record<DockSide, number> = { left: 220, right: 280, top: 140, bottom: 120 };
-const BORDER_MAX: Record<DockSide, number> = { left: 560, right: 760, top: 480, bottom: 520 };
+/// 钉住态用 tabset 的 weight 按同一组数值配比初始宽度；宿主被扫掉后重钉也按这组数复原。
+export const BORDER_SIZE: Record<DockSide, number> = { left: 320, right: 460, top: 240, bottom: 176 };
+export const BORDER_MIN: Record<DockSide, number> = { left: 220, right: 280, top: 140, bottom: 120 };
+export const BORDER_MAX: Record<DockSide, number> = { left: 560, right: 760, top: 480, bottom: 520 };
 
 /// 中心区在根 row 里的权重。和 dock 的 weight(=BORDER_SIZE) 竞争份额的是"装着 CENTER 的最外层
 /// 容器"那一格，不是 CENTER 自己——库的 row weight 默认才 100，中心区不显式写就会被 320/460 压成窄条，
@@ -45,48 +46,44 @@ export function borderId(side: DockSide): string {
   return `border_${side}`;
 }
 
-/// 面板的初始归属边；其余边留空，等用户拖过去
-const DEFAULT_CHILDREN: Record<DockSide, IJsonTabNode[]> = {
-  left: [
-    {
-      type: "tab",
-      id: PANEL_SESSIONS,
-      name: "Session Manager",
-      component: PANEL_SESSIONS,
-      enableClose: false,
-      enableFloat: false,
-    },
-    {
-      type: "tab",
-      id: PANEL_COMMANDS,
-      name: "Command Manager",
-      component: PANEL_COMMANDS,
-      enableClose: false,
-      enableFloat: false,
-    },
-  ],
-  right: [
-    {
-      type: "tab",
-      id: PANEL_FILES,
-      name: "File Panel",
-      component: PANEL_FILES,
-      enableClose: false,
-      enableFloat: false,
-    },
-  ],
-  top: [],
-  bottom: [
-    {
-      type: "tab",
-      id: PANEL_TRANSFERS,
-      name: "Transfers",
-      component: PANEL_TRANSFERS,
-      enableClose: false,
-      enableFloat: false,
-    },
-  ],
+/// 面板页签的显示名走 i18n：布局 JSON 里的 name 是会被存盘的，所以出厂名按当前语言生成，
+/// 切语言时由 App 里的 syncPanelTabNames 换名（传输区已并进文件面板，只服务旧存档）。
+export const PANEL_TAB_KEY: Record<string, string> = {
+  [PANEL_SESSIONS]: "sm.title",
+  [PANEL_COMMANDS]: "cm.title",
+  [PANEL_FILES]: "fp.title",
+  [PANEL_PERF]: "perf.title",
+  [PANEL_TRANSFERS]: "tp.title",
 };
+
+const panelName = (id: string): string => (PANEL_TAB_KEY[id] ? t(PANEL_TAB_KEY[id]) : id);
+
+const panelTab = (id: string): IJsonTabNode => ({
+  type: "tab",
+  id,
+  name: panelName(id),
+  component: id,
+  enableClose: false,
+  enableFloat: false,
+});
+
+/// 面板的初始归属边；其余边留空，等用户拖过去。
+/// 函数不是常量：页签名要按调用时的语言现取，冻成常量会把名字停在模块求值那一刻。
+const defaultChildren = (): Record<DockSide, IJsonTabNode[]> => ({
+  left: [panelTab(PANEL_SESSIONS), panelTab(PANEL_COMMANDS)],
+  right: [panelTab(PANEL_FILES), panelTab(PANEL_PERF)],
+  top: [],
+  /// 传输区不再是独立工具窗：它固定在文件面板底部（见 FilePanel），四条边出厂都是空的
+  bottom: [],
+});
+
+/// 面板标签的出厂定义（显示名、不许直接关标签、不许浮出）。视图菜单重开面板要按 id 取回这一份：
+/// 少了 enableClose:false 用户就能直接关掉面板标签，而视图开关不知道这件事（它只在开关时同步布局），
+/// 结果是"菜单里还勾着、面板却没了"；名字退成 id 则让浮窗顶栏写出 "commands" 这种内部名。
+export function panelTabJson(id: string): IJsonTabNode {
+  const known = Object.values(defaultChildren()).some((tabs) => tabs.some((t) => t.id === id));
+  return known ? panelTab(id) : { type: "tab", id, name: panelName(id), component: id };
+}
 
 /// 钉住态的宿主 tabset：标签条在底部（VS 工具窗页签位置），minWidth 沿用边条的最小厚度
 const dockTabset = (side: DockSide, extra?: Partial<IJsonTabSetNode>): IJsonTabSetNode => ({
@@ -95,7 +92,7 @@ const dockTabset = (side: DockSide, extra?: Partial<IJsonTabSetNode>): IJsonTabS
   tabLocation: "bottom",
   weight: BORDER_SIZE[side],
   minWidth: BORDER_MIN[side],
-  children: DEFAULT_CHILDREN[side].map((c) => ({ ...c })),
+  children: defaultChildren()[side].map((c) => ({ ...c })),
   ...extra,
 });
 
@@ -106,7 +103,7 @@ export function defaultLayout(): IJsonModel {
       tabEnablePopout: false,
       tabEnablePopoutIcon: false,
       tabEnablePin: false,
-      // 应用内浮动面板（可自由摆位）开放；三个工具窗口各自 enableFloat:false 保持贴边
+      // 应用内浮动面板（可自由摆位）开放；工具窗口各自 enableFloat:false 保持贴边
       tabEnableFloat: true,
       tabEnableFloatIcon: true,
       tabSetEnableDeleteWhenEmpty: false,
@@ -121,11 +118,12 @@ export function defaultLayout(): IJsonModel {
       children: [
         dockTabset("left"),
         {
-          // 库没有 col：嵌套的 row 自动换向，这层是竖排（中心区 + 下边钉住区）。
-          // 这层的 weight 才是中心区在根 row 里争取到的份额，必须显式给，缺省 100 会被边 dock 压扁。
+          // 库没有 col：嵌套的 row 自动换向。这层"中心区格"出厂只装 CENTER，用户往上下左右拖出钉住
+          // 面板时新栏就劈在这里；它的 weight 才是中心区在根 row 里争取到的份额，必须显式给，
+          // 缺省 100 会被边 dock 压扁。
           type: "row",
           weight: CENTER_WEIGHT,
-          children: [{ type: "tabset", id: CENTER, weight: CENTER_WEIGHT, children: [] }, dockTabset("bottom")],
+          children: [{ type: "tabset", id: CENTER, weight: CENTER_WEIGHT, children: [] }],
         },
         dockTabset("right"),
       ],
@@ -154,24 +152,26 @@ function hasTab(node?: JsonNode): boolean {
 }
 
 /// 只留几何：重启时连接并不存在，终端标签必须丢掉，否则中心区域会挂着一排打不开的死标签。
+/// 老存档里的独立传输面板也一并丢掉：它现在是文件面板底部的固定区，留着会在启动时留一个空宿主栏。
 /// subLayouts（浮动面板）里存的是完整的一份 model，所以要递归进去；剪空的浮动面板整个丢掉，
 /// 不然重启后屏幕上会留一个空浮窗。
-function pruneTerminals(json: unknown): void {
+function pruneGoneTabs(json: unknown): void {
   const model = json as {
     layout?: JsonNode;
     borders?: JsonNode[];
     subLayouts?: Record<string, { layout?: JsonNode; borders?: JsonNode[] }>;
   };
   if (!model || typeof model !== "object") return;
+  const gone = new Set(["terminal", PANEL_TRANSFERS]);
   const walk = (node?: JsonNode): JsonNode | undefined => {
     if (!node || !Array.isArray(node.children)) return node;
-    node.children = node.children.filter((c) => c.component !== "terminal").map((c) => walk(c) as JsonNode);
+    node.children = node.children.filter((c) => !gone.has(String(c.component))).map((c) => walk(c) as JsonNode);
     return node;
   };
   walk(model.layout);
   model.borders?.forEach(walk);
   for (const [id, sub] of Object.entries(model.subLayouts ?? {})) {
-    pruneTerminals(sub);
+    pruneGoneTabs(sub);
     if (!hasTab(sub.layout) && !(sub.borders ?? []).some(hasTab)) delete model.subLayouts?.[id];
   }
 }
@@ -181,7 +181,7 @@ export function loadLayout(): IJsonModel {
     const raw = localStorage.getItem(STORE);
     if (raw) {
       const json = JSON.parse(raw) as IJsonModel;
-      pruneTerminals(json);
+      pruneGoneTabs(json);
       ensureBorders(json);
       normalizeBorders(json);
       raiseCenterRegion(json);
@@ -247,11 +247,15 @@ function raiseCenterRegion(json: IJsonModel): void {
   for (const n of trail.slice(1)) if (n.weight === undefined) n.weight = CENTER_WEIGHT;
 }
 
-/// ---------- 面板归属边与钉住状态的记忆 ----------
+/// ---------- 面板归属边、钉住状态与宿主厚度的记忆 ----------
 /// 视图菜单关掉面板时节点会被删掉，重开要落回它原来那条边，而不是硬编码的默认边。
 /// hidden=true 表示自动隐藏（收在边条里）；false 表示钉住（主布局边缘的 tabset）。
+/// frac 是钉住时宿主在它那一行里的宽度份额（0~1）：整条边都拔成自动隐藏后宿主会被当空壳扫掉，
+/// 重钉只能新劈一栏，没有这个数就只能回到出厂厚度。
+/// 用份额不用 weight：分隔条拖过一次之后同一行的 weight 会被归一成百分比（24.9 对 75.1），
+/// 和出厂那套 320/1000 不同量纲，直接存 weight 下次会把栏算没。
 /// 老存档只记边（字符串），按钉住算：VS 的默认态就是 docked。
-export type PanelDockState = { side: DockSide; hidden: boolean };
+export type PanelDockState = { side: DockSide; hidden: boolean; frac?: number };
 
 export function loadPanelDock(): Record<string, PanelDockState> {
   const out: Record<string, PanelDockState> = {};
