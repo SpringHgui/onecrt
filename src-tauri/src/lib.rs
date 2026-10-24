@@ -1,5 +1,6 @@
 mod files;
 mod sessions;
+pub mod stats;
 pub mod terminal;
 
 use sessions::{CommandTree, SessionTree};
@@ -118,6 +119,21 @@ async fn sftp_upload(
 }
 
 #[tauri::command]
+async fn stats_start(
+    state: State<'_, stats::Shared>,
+    args: stats::StartArgs,
+    on_event: tauri::ipc::Channel<stats::OutEvent>,
+) -> Result<(), String> {
+    stats::start(&state, args, on_event).await
+}
+
+#[tauri::command]
+async fn stats_stop(state: State<'_, stats::Shared>, id: String) -> Result<(), String> {
+    stats::stop(&state, &id).await;
+    Ok(())
+}
+
+#[tauri::command]
 fn local_home() -> String {
     files::local_home()
 }
@@ -177,8 +193,12 @@ fn pick_key_file() -> Option<String> {
 pub fn run() {
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        // 应用内更新：装完新包要 relaunch 才生效（Linux 的 AppImage 尤其靠这一步）
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .manage(terminal::new_manager())
         .manage(files::new_manager())
+        .manage(stats::new_manager())
         .invoke_handler(tauri::generate_handler![
             load_sessions,
             save_sessions,
@@ -196,6 +216,8 @@ pub fn run() {
             sftp_close,
             sftp_download,
             sftp_upload,
+            stats_start,
+            stats_stop,
             local_home,
             local_shortcuts,
             clipboard_read,

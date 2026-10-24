@@ -1,16 +1,20 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type ComponentType } from "react";
 import { invoke, Channel } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import {
+  IconChartArea,
   IconDeviceDesktopPlus,
+  IconFolder,
   IconFolderPlus,
   IconMoon,
-  IconPlus,
+  IconServer,
   IconSettings,
   IconSun,
+  IconTerminal2,
   IconTrash,
 } from "@tabler/icons-react";
 import { ink } from "./icons";
+import { startDockStripFit } from "./dockStripFit";
 import {
   Actions,
   BorderNode,
@@ -23,7 +27,6 @@ import {
   TabNode,
   TabSetNode,
   type Action,
-  type IJsonTabNode,
   type ILayoutApi,
 } from "flexlayout-react";
 import {
@@ -32,13 +35,18 @@ import {
   DOCK_TABSET,
   PANEL_COMMANDS,
   PANEL_FILES,
+  PANEL_PERF,
   PANEL_SESSIONS,
-  PANEL_TRANSFERS,
+  PANEL_TAB_KEY,
   borderId,
+  BORDER_MAX,
+  BORDER_MIN,
+  BORDER_SIZE,
   clearLayout,
   defaultLayout,
   loadLayout,
   loadPanelDock,
+  panelTabJson,
   saveLayout,
   savePanelDock,
   type DockSide,
@@ -51,7 +59,7 @@ import PasswordPrompt from "./PasswordPrompt";
 import ConfirmDialog from "./ConfirmDialog";
 import CommandManager from "./CommandManager";
 import FilePanel from "./FilePanel";
-import TransferPanel from "./TransferPanel";
+import PerfPanel from "./PerfPanel";
 import PanelPin from "./PanelPin";
 import FloatCaptionControls from "./FloatCaption";
 import DockCompass, { compassTargetAt, type CompassTarget } from "./DockCompass";
@@ -64,7 +72,7 @@ import Toolbar from "./Toolbar";
 import StatusBar from "./StatusBar";
 import { buildMenus } from "./menus";
 import { useView, useWindowToggles, useZoom, type ViewKey } from "./view";
-import { useI18n, t } from "./i18n";
+import { useI18n, t, LOCALES, tLocale } from "./i18n";
 
 type TabStatus = "connecting" | "ready" | "error" | "closed";type Theme = "dark" | "light";
 
@@ -209,6 +217,8 @@ const newCommandFolder = (): CommandNode => ({
   children: [],
 });
 
+const treeHasSession = (nodes: Node[]): boolean => nodes.some((n) => !isFolder(n) || treeHasSession(n.children));
+
 function withNewFolder<T extends AnyNode>(nodes: T[], parentId: string | null, make: () => T): T[] {
   const pid = findNode(nodes, parentId ?? "") ? parentId : null;
   if (pid === null) return [...nodes, make()];
@@ -230,8 +240,18 @@ type HeaderCtl = { pinned?: boolean; onTogglePin?: () => void };
 /// 程序侧发起的布局动作都打这个标记，onModelChange 靠它区分"用户拖的"和"我们自己改的"
 const FROM_APP = { fromApp: true };
 
-/// 四个工具窗的 tab id：整组标签都是面板的 tabset 就是某条边的钉住宿主
-const PANEL_TAB_IDS: Set<string> = new Set([PANEL_SESSIONS, PANEL_COMMANDS, PANEL_FILES, PANEL_TRANSFERS]);
+/// 工具窗的 tab id：整组标签都是面板的 tabset 就是某条边的钉住宿主。
+/// 传输区不在列——它固定在文件面板底部，不再单独占一条边。
+const PANEL_TAB_IDS: Set<string> = new Set([PANEL_SESSIONS, PANEL_COMMANDS, PANEL_FILES, PANEL_PERF]);
+
+/// 工具窗各自的页签图标。底部页签条挤窄时文字会整条藏掉，这个图标就是唯一的身份（见 dockStripFit），
+/// 所以图形要能一眼对上面板本身：会话=服务器、命令=终端、文件=目录、性能=面积折线。
+const PANEL_TAB_ICON: Record<string, ComponentType<{ size: number; stroke: number }>> = {
+  [PANEL_SESSIONS]: IconServer,
+  [PANEL_COMMANDS]: IconTerminal2,
+  [PANEL_FILES]: IconFolder,
+  [PANEL_PERF]: IconChartArea,
+};
 
 function isPanelDockTabset(ts: TabSetNode): boolean {
   if (ts.getId() === CENTER) return false;
@@ -239,6 +259,9 @@ function isPanelDockTabset(ts: TabSetNode): boolean {
   const kids = ts.getChildren();
   return kids.length > 0 && kids.every((c) => PANEL_TAB_IDS.has(c.getId()));
 }
+
+/// flexlayout 的 Node 联合类型没把 getWeight 声明齐（RowNode/TabSetNode 上都有），统一这样取
+const nodeWeight = (n: unknown): number => Math.max(0, Number((n as { getWeight?: () => number }).getWeight?.()) || 0);
 
 /// 新终端的落点：优先用户正在看的分组，但工具窗宿主除外——双击左侧会话树里的节点时，
 /// 活动 tabset 恰恰是会话管理器所在的那条边，直接插进去会让终端和面板并排成同一层标签。
@@ -286,24 +309,32 @@ function floorNewPanes(m: Model, seen: Set<string> | null): Set<string> {
   return now;
 }
 
-/// 中心区里 0 标签的 tabset 全拆掉。库开着 tabSetEnableDeleteWhenEmpty:false 不会自删，
+/// 0 标签的 tabset 全拆掉。库开着 tabSetEnableDeleteWhenEmpty:false 不会自删，
 /// 面板/终端浮出去或搬走之后宿主就成空壳（用户截图里"一堆空白容器"就是这么攒的）。
-/// 两类除外：border 上的（空了会自动隐藏，拆了会破坏 border 结构）和 CENTER 本身
+/// 主布局两类除外：border 上的（空了会自动隐藏，拆了会破坏 border 结构）和 CENTER 本身
 /// （没终端时靠它显示"双击会话新建连接"的空态文案）。
+/// 浮窗里的空壳照拆：拆掉最后一个 tabset 之后库的 tidy 会把整条 subLayout 从 model 里删掉，
+/// 浮窗跟着消失。不拆就剩一具没标签、连顶栏按钮都出不来的浮窗空架（✕ 关掉浮窗面板就这样）。
 function sweepEmptyTabsets(m: Model) {
   const dead: string[] = [];
+  let deadMain = false;
   m.visitNodes((n) => {
-    if (!(n instanceof TabSetNode) || n.getLayoutId() !== Model.MAIN_LAYOUT_ID) return;
-    if (n.getId() === CENTER || n.getParent() instanceof BorderNode) return;
-    if (n.getChildren().length === 0) dead.push(n.getId());
+    if (!(n instanceof TabSetNode) || n.getChildren().length > 0) return;
+    if (n.getLayoutId() === Model.MAIN_LAYOUT_ID) {
+      if (n.getId() === CENTER || n.getParent() instanceof BorderNode) return;
+      deadMain = true;
+    }
+    dead.push(n.getId());
   });
   for (const id of dead) m.doAction(Actions.deleteTabset(id).setUserData(FROM_APP));
-  if (dead.length) restoreCenterWeight(m);
+  if (deadMain) restoreCenterWeight(m);
 }
 
 /// 中心区（装着 CENTER 的最外层容器那一格）和边 dock 抢宽度用的是它自己的 weight，不是 CENTER 的。
 /// 库的 row weight 默认 100，边 dock 用 320/460：这一格掉回默认值时中心区只剩 11% 宽，
-/// 劈一栏之后每边百来像素，看着像被隐藏了。结构性删改后把它顶回"恒大于任一 dock"。
+/// 劈一栏之后每边百来像素，看着像被隐藏了。结构性删改后把它顶回中心区该有的份额。
+/// 比的是份额不是原始 weight：拖过一次分隔条，同一行的 weight 会被归一成百分比（24.9 对 75.1），
+/// 和出厂那套 320/1000 不同量纲，直接拿数值相比会把 dock 挤成 200px 的边条（或把中心区挤没）。
 /// 只动容器不动 CENTER 的权重——中心区内部劈出来的几栏照样等分（拖分隔条走 ADJUST_WEIGHTS，不触发这里）。
 function restoreCenterWeight(m: Model) {
   const center = m.getNodeById(CENTER);
@@ -314,20 +345,16 @@ function restoreCenterWeight(m: Model) {
     if (!(parent instanceof RowNode) || !parent.getParent()) break; // parent 是根 row：region 就是竞争那一格
     region = parent;
   }
-  let maxDock = 0;
-  m.visitNodes((n) => {
-    if (!(n instanceof TabSetNode) || n.getLayoutId() !== Model.MAIN_LAYOUT_ID || n === region) return;
-    let anc = n.getParent();
-    while (anc) {
-      if (anc === region) return; // 中心区自己劈出来的栏，不算 dock
-      anc = anc.getParent();
-    }
-    maxDock = Math.max(maxDock, Number(n.getWeight()) || 0);
-  });
-  const want = Math.max(CENTER_WEIGHT, maxDock * 3);
-  if ((Number(region.getWeight()) || 0) < want) {
-    m.doAction(Actions.updateNodeAttributes(region.getId(), { weight: want }).setUserData(FROM_APP));
-  }
+  const row = region.getParent();
+  if (!(row instanceof RowNode)) return;
+  const own = nodeWeight(region);
+  const sumOther = row.getChildren().filter((c) => c !== region).reduce((a, c) => a + nodeWeight(c), 0);
+  if (own + sumOther <= 0) return; // 整行都没写过 weight：库按等分算，不会被谁压扁
+  const share = own / (own + sumOther);
+  const id = region.getId();
+  if (!id || share >= 0.55) return;
+  const want = Math.round((sumOther * 0.55) / 0.45);
+  m.doAction(Actions.updateNodeAttributes(id, { weight: Math.max(want, own) }).setUserData(FROM_APP));
 }
 
 /// 旧存档的左右边是 split 且没开自动隐藏：空的时候不收起，屏幕上留一条空白 bar。
@@ -343,9 +370,11 @@ function normalizeBordersLive(m: Model) {
   }
 }
 
-/// 底部页签条在只有一个页签时是纯冗余（没得切），关掉；加到第二个再放出来。
+/// 底部页签条在只有一个页签时是纯冗余（没得切），关掉；加到第二个再放出来。两个方向都当场跟着走。
 /// 只动主布局里 tabLocation=bottom 的宿主（停靠面板/翻到底部的页签条），中心区页签在顶部不受影响。
-function collapseSingleTabStrips(m: Model, last: Map<string, boolean>) {
+/// 收掉页签不等于没了抓手：面板自己的标题栏就是拖拽把手（见 headerDrag），而往这个宿主里并进第 2 个
+/// 面板走的是内容区中心的落点（库的 canDrop 用 contentRect，不看页签条），所以 2→1 无需留手。
+function syncDockTabStrips(m: Model, last: Map<string, boolean>) {
   const flips: { id: string; want: boolean }[] = [];
   m.visitNodes((n) => {
     if (!(n instanceof TabSetNode) || n.getLayoutId() !== Model.MAIN_LAYOUT_ID) return;
@@ -356,6 +385,22 @@ function collapseSingleTabStrips(m: Model, last: Map<string, boolean>) {
     flips.push({ id: n.getId(), want });
   });
   for (const f of flips) m.doAction(Actions.updateNodeAttributes(f.id, { enableTabStrip: f.want }).setUserData(FROM_APP));
+}
+
+/// 面板页签名是布局 JSON 的一部分，落盘时写的是当时的语言：旧存档、以及从英文界面存出去的布局
+/// 里会留着 "Session Manager" 这类英文名。切语言时按 key 换名；只动仍是某语言出厂默认名（或内部 id）
+/// 的页签，用户自己改过的名字留着不动。
+function syncPanelTabNames(m: Model) {
+  m.visitNodes((n) => {
+    if (!(n instanceof TabNode)) return;
+    const key = PANEL_TAB_KEY[n.getComponent() ?? ""];
+    if (!key) return;
+    const want = t(key);
+    const cur = n.getName();
+    if (cur === want) return;
+    const factoryNames = [...LOCALES.map((l) => tLocale(l, key)), n.getId()];
+    if (factoryNames.includes(cur)) m.doAction(Actions.renameTab(n.getId(), want).setUserData(FROM_APP));
+  });
 }
 
 /// 模块每次被 HMR 重新求值就 +1。把它挂进收尾 effect 的依赖，热更新后 effect 会重跑一次，
@@ -384,6 +429,9 @@ export default function App() {
   const [menu, setMenu] = useState<CtxMenu | null>(null);
   const [clipboard, setClipboard] = useState<null | { node: Node; cut: boolean }>(null);
   const [theme, setTheme] = useState<Theme>(initialTheme);
+  /// 主题必须在这里（渲染阶段）就落到 <html>，不能放进下面的 effect：
+  /// React 先跑子组件的 effect 再跑父组件的，Terminal 读 CSS 变量时会拿到上一档主题。
+  document.documentElement.dataset.theme = theme;
   const { view, toggleView, setView } = useView();
   const { fontSize, zoomIn, zoomOut, zoomReset } = useZoom();
   const { fullScreen, toggleFullScreen, alwaysOnTop, toggleAlwaysOnTop } = useWindowToggles();
@@ -1116,7 +1164,7 @@ export default function App() {
     [PANEL_SESSIONS]: "left",
     [PANEL_COMMANDS]: "left",
     [PANEL_FILES]: "right",
-    [PANEL_TRANSFERS]: "bottom",
+    [PANEL_PERF]: "right",
   };
   const DOCK_LOC: Record<DockSide, DockLocation> = {
     left: DockLocation.LEFT,
@@ -1141,30 +1189,37 @@ export default function App() {
   /// 先把这些面板记进待归位集合，等它在主布局露面后（effect）再按记忆的边搬回去。
   const pendingRestoreRef = useRef<Set<string>>(new Set());
 
-  const rememberDock = (id: string, side: DockSide, hidden: boolean) => {
+  const rememberDock = (id: string, side: DockSide, hidden: boolean, frac?: number) => {
     const cur = panelDock.current[id];
-    if (cur && cur.side === side && cur.hidden === hidden) return;
-    panelDock.current = { ...panelDock.current, [id]: { side, hidden } };
+    const f = frac ?? cur?.frac;
+    if (cur && cur.side === side && cur.hidden === hidden && cur.frac === f) return;
+    panelDock.current = { ...panelDock.current, [id]: { side, hidden, frac: f } };
     savePanelDock(panelDock.current);
   };
   const dockState = (id: string): PanelDockState => panelDock.current[id] ?? { side: DEFAULT_SIDE[id], hidden: false };
 
-  /// 四个工具窗口：视图菜单的开关就是往它当前那条边加/摘标签
+  /// 面板现在这个宿主在它那一行里占的份额。拔钉之前量一次，整条边清空、宿主被扫掉之后按它复原厚度。
+  /// 只在这条行里比 weight 才有意义（它们是同一量纲的相对值），所以取份额不取绝对 weight。
+  const hostFrac = (m: Model, id: string): number | undefined => {
+    const node = m.getNodeById(id);
+    const host = node instanceof TabNode ? node.getParent() : undefined;
+    if (!(host instanceof TabSetNode) || host.getId() === CENTER) return undefined;
+    const row = host.getParent();
+    if (!row) return undefined;
+    const sibs = row.getChildren();
+    const sum = sibs.reduce((a, c) => a + nodeWeight(c), 0);
+    const own = nodeWeight(host);
+    if (sum <= 0 || own <= 0) return undefined;
+    return Math.min(0.8, own / sum);
+  };
+
+  /// 四个工具窗：视图菜单的开关就是往它当前那条边加/摘标签
   const panelSlots: { key: ViewKey; id: string }[] = [
     { key: "sessionManager", id: PANEL_SESSIONS },
     { key: "cmdManager", id: PANEL_COMMANDS },
     { key: "filePanel", id: PANEL_FILES },
-    { key: "transfers", id: PANEL_TRANSFERS },
+    { key: "perfPanel", id: PANEL_PERF },
   ];
-
-  const panelJson = (id: string): IJsonTabNode => {
-    for (const border of defaultLayout().borders ?? []) {
-      for (const child of border.children ?? []) {
-        if (child.id === id) return { ...child };
-      }
-    }
-    return { type: "tab", id, name: id, component: id };
-  };
 
   /// 中心区域当前选中的终端；活动 tabset 取不到时退到任意选中的终端标签
   const selectedTerminalId = (m: Model): string | null => {
@@ -1246,12 +1301,14 @@ export default function App() {
         rememberDock(slot.id, parent.getLocation().getName() as DockSide, true);
       } else if (parent instanceof TabSetNode && parent.getId() !== CENTER) {
         let known = dockedRef.current.get(parent.getId());
+        // 上一轮还没见过这个 tabset id = 这一下拖放刚劈出来的新栏，得给它配该边的厚度
+        const brandNew = !seenTabsetsRef.current?.has(parent.getId());
         if (!known) {
           // 新劈的 tabset DOM 还没重画，量几何会读到旧位置：优先信这一下动作里带的边
           known = dropEdge(action) ?? sideOfTabset(parent.getId());
-          adoptDockTabset(parent, known);
+          adoptDockTabset(parent, known, brandNew);
         }
-        rememberDock(slot.id, known, false);
+        rememberDock(slot.id, known, false, hostFrac(m, slot.id));
       }
     }
     // 浮窗并回：这一刻面板已经落进库挑的宿主，按记忆的边搬回去，再扫掉劈空的壳。
@@ -1276,13 +1333,19 @@ export default function App() {
       action.type === Actions.POPOUT_TAB ||
       action.type === Actions.MOVE_NODE ||
       action.type === Actions.DELETE_TAB ||
+      action.type === Actions.ADD_TAB ||
       action.type === Actions.DOCK_FLOAT_TO_LAYOUT
     ) {
       sweepEmptyTabsets(m);
+      // 宿主只剩 1 个面板时当场收掉页签条，并进来第 2 个时再亮出来
+      syncDockTabStrips(m, singleStripRef.current);
     }
     // 刚劈出来的那栏没有尺寸下限，会被邻居的 minWidth 挤成一条缝（实测 164px），看着像被隐藏了
     seenTabsetsRef.current = floorNewPanes(m, seenTabsetsRef.current);
   };
+
+  /// 记录每个底部宿主上一次设置的 enableTabStrip，避免收尾 effect 每轮重复下动作
+  const singleStripRef = useRef<Map<string, boolean>>(new Map());
 
   useEffect(() => {
     for (const slot of panelSlots) {
@@ -1290,24 +1353,27 @@ export default function App() {
       if (view[slot.key] && !node) {
         const st = dockState(slot.id);
         if (st.hidden) {
-          layoutAction(Actions.addTab(panelJson(slot.id), borderId(st.side), DOCK_LOC[st.side], -1, false));
+          layoutAction(Actions.addTab(panelTabJson(slot.id), borderId(st.side), DOCK_LOC[st.side], -1, false));
           continue;
         }
         const ts = panelTabsetFor(st.side);
-        if (ts) layoutAction(Actions.addTab(panelJson(slot.id), ts.getId(), DockLocation.CENTER, -1, true));
+        if (ts) layoutAction(Actions.addTab(panelTabJson(slot.id), ts.getId(), DockLocation.CENTER, -1, true));
         else {
-          layoutAction(Actions.addTab(panelJson(slot.id), CENTER, DOCK_LOC[st.side], -1, true));
+          layoutAction(Actions.addTab(panelTabJson(slot.id), CENTER, DOCK_LOC[st.side], -1, true));
           const p = model.getNodeById(slot.id)?.getParent();
-          if (p instanceof TabSetNode) adoptDockTabset(p, st.side);
+          if (p instanceof TabSetNode) adoptDockTabset(p, st.side, true);
         }
       } else if (!view[slot.key] && node) {
         layoutAction(Actions.deleteTab(slot.id));
       }
     }
+    // 新开的面板可能落在一株刚劈出来的宿主上（tabLocation 是 adopt 之后才翻到底部的），
+    // 那时 ADD_TAB 那一下的同步还看不见它，这里补一次
+    syncDockTabStrips(model, singleStripRef.current);
   }, [model, view]);
 
-  /// 记录每个底部宿主上一次设置的 enableTabStrip，避免收尾 effect 每轮重复下动作
-  const singleStripRef = useRef<Map<string, boolean>>(new Map());
+  /// 底部页签条挤到放不下文字时退成只剩图标。判据要实测宽度，CSS 比不了长度，所以单独一趟扫描。
+  useEffect(() => startDockStripFit(), []);
 
   /// 旧存档是按老规矩存的：面板住在边条里（钉住/隐藏按整条边的 borderType 分），更旧的还有空 tabset、
   /// 停在中心区的面板（用户那屏"一堆空白容器"）。加载时先认领盘上的钉住宿主，再按 store 逐个归位：
@@ -1336,7 +1402,7 @@ export default function App() {
     }
     sweepEmptyTabsets(model);
     normalizeBordersLive(model);
-    collapseSingleTabStrips(model, singleStripRef.current);
+    syncDockTabStrips(model, singleStripRef.current);
   }, [model, HMR_TICK]);
 
   /// ---------- 拖出窗口 → 就地变成浮动面板 ----------
@@ -1374,10 +1440,14 @@ export default function App() {
       // 标签区比罗盘还小时整体缩一圈，别让箭头戳到区外
       el.style.setProperty("--k", String(Math.min(1, Math.min(t.w, t.h) / 200)));
     };
-    const onDragStart = (e: DragEvent) => {
-      dragNodeRef.current = nodeIdOf(e.target);
+    const clearDrag = () => {
+      dragNodeRef.current = null;
       dragLeftWindowRef.current = false;
       paintCompass(null);
+    };
+    const onDragStart = (e: DragEvent) => {
+      clearDrag();
+      dragNodeRef.current = nodeIdOf(e.target);
     };
     const onDragOver = (e: DragEvent) => {
       if (dragNodeRef.current) paintCompass(compassTargetAt(e.clientX, e.clientY));
@@ -1390,9 +1460,7 @@ export default function App() {
     const onDragEnd = (e: DragEvent) => {
       const id = dragNodeRef.current;
       const leftWindow = dragLeftWindowRef.current;
-      dragNodeRef.current = null;
-      dragLeftWindowRef.current = false;
-      paintCompass(null);
+      clearDrag();
       if (!id || !leftWindow) return;
       const root = layoutRef.current?.getRootDiv();
       if (!root || !model.getNodeById(id)) return;
@@ -1412,17 +1480,22 @@ export default function App() {
       const floatId = model.getNodeById(id)?.getLayoutId();
       if (floatId) layoutAction(Actions.moveFloat(floatId, rect));
     };
+    /// 收尾不能只等 dragend：落点成功时库改模型，页签按钮跟着被搬进别的 tabset 而卸掉，
+    /// 紧跟其后的 dragend 打在脱离文档的节点上，冒不到 window，罗盘就留在屏上。
+    const onDrop = () => clearDrag();
     window.addEventListener("dragstart", onDragStart, true);
     window.addEventListener("dragover", onDragOver, true);
     window.addEventListener("dragenter", onDragEnter, true);
     window.addEventListener("dragleave", onDragLeave, true);
     window.addEventListener("dragend", onDragEnd, true);
+    window.addEventListener("drop", onDrop, true);
     return () => {
       window.removeEventListener("dragstart", onDragStart, true);
       window.removeEventListener("dragover", onDragOver, true);
       window.removeEventListener("dragenter", onDragEnter, true);
       window.removeEventListener("dragleave", onDragLeave, true);
       window.removeEventListener("dragend", onDragEnd, true);
+      window.removeEventListener("drop", onDrop, true);
     };
   }, [model]);
 
@@ -1435,6 +1508,11 @@ export default function App() {
       if (want && t.getName() !== want) layoutAction(Actions.renameTab(t.getId(), want));
     });
   }, [model, tabTitles]);
+
+  /// 面板页签名跟着语言换（首轮同时负责把旧存档里的英文名改过来）
+  useEffect(() => {
+    syncPanelTabNames(model);
+  }, [model, locale]);
 
   useEffect(() => {
     // tabEnableRename：右键"Rename"走 flexlayout 的行内编辑框，不再弹窗
@@ -1588,9 +1666,10 @@ export default function App() {
     onDragStart: (e) => layoutRef.current?.moveTabWithDragAndDrop(e.nativeEvent, node),
   });
 
-  /// 传输一开始就把底部的传输面板放出来。由文件面板回调触发（不是订阅 store）：
+  /// 传输一开始就把文件面板放出来（传输区就在它底部）。由文件面板回调触发（不是订阅 store）：
   /// 进度 tick 一秒来十几次，让 App 跟着订阅会带着整个工作区重渲染。
-  const showTransfers = () => setView((v) => (v.transfers ? v : { ...v, transfers: true }));
+  const showTransfers = () =>
+    setView((v) => (v.filePanel && v.transfers ? v : { ...v, filePanel: true, transfers: true }));
 
   const panelContent = (node: TabNode) => {
     const c = node.getComponent();
@@ -1606,22 +1685,23 @@ export default function App() {
           params={activeParams}
           onClose={() => toggleView("filePanel")}
           onTransferStart={showTransfers}
+          transfersOpen={view.transfers}
           pinned={pin?.pinned}
           onTogglePin={pin?.onTogglePin}
           drag={drag}
         />
       );
     }
-    if (c === PANEL_TRANSFERS) {
+    if (c === PANEL_PERF) {
       return (
-        <div className="dock-fill">
-          <TransferPanel
-            onClose={() => toggleView("transfers")}
-            pinned={pin?.pinned}
-            onTogglePin={pin?.onTogglePin}
-            drag={drag}
-          />
-        </div>
+        <PerfPanel
+          tabId={activeTab}
+          params={activeParams}
+          onClose={() => toggleView("perfPanel")}
+          pinned={pin?.pinned}
+          onTogglePin={pin?.onTogglePin}
+          drag={drag}
+        />
       );
     }
     return null;
@@ -1653,11 +1733,16 @@ export default function App() {
     }
   };
 
-  /// 终端标签前面点状态点，替掉原来自绘的 tabbar
+  /// 终端标签前面点状态点，替掉原来自绘的 tabbar；工具窗标签放各自的图标
   const onRenderTab = (node: TabNode, rv: { leading: React.ReactNode; content: React.ReactNode; buttons: React.ReactNode[] }) => {
-    if (node.getComponent() !== "terminal") return;
-    const t = tabs.find((x) => x.id === node.getId());
-    if (t) rv.leading = <span className={`status-dot ${t.status}`} />;
+    const c = node.getComponent();
+    if (c === "terminal") {
+      const t = tabs.find((x) => x.id === node.getId());
+      if (t) rv.leading = <span className={`status-dot ${t.status}`} />;
+      return;
+    }
+    const Icon = PANEL_TAB_ICON[c ?? ""];
+    if (Icon) rv.leading = <Icon {...ink(14)} />;
   };
 
   /// 某条边的钉住宿主 tabset：认领表里边 -> id；节点已被当空壳扫掉时顺手除名
@@ -1671,12 +1756,39 @@ export default function App() {
     return undefined;
   };
 
-  /// 认领一个钉住宿主：记边，并把标签条翻到底部（VS 工具窗的页签位置）
-  const adoptDockTabset = (ts: TabSetNode, side: DockSide) => {
+  /// 认领一个钉住宿主：记边，并把标签条翻到底部（VS 工具窗的页签位置）。
+  /// fresh=true 表示这栏是这一下动作刚劈出来的：库劈中心区时把权重对半分（1000→500/500），
+  /// 新宿主白占半个窗口，看着就像布局压根没记住。按记下的份额（没有就按该边出厂比例）重配。
+  const adoptDockTabset = (ts: TabSetNode, side: DockSide, fresh = false) => {
     dockedRef.current.set(ts.getId(), side);
     if (ts.getTabLocation() !== "bottom") {
       layoutAction(Actions.updateNodeAttributes(ts.getId(), { tabLocation: "bottom" }).setUserData(FROM_APP));
     }
+    if (!fresh) return;
+    const f = dockFracFor(side);
+    const row = ts.getParent();
+    const others = (row?.getChildren() ?? []).filter((c) => c !== ts);
+    const sumOther = others.reduce((a, c) => a + nodeWeight(c), 0);
+    // 份额换成 weight 要和同行的兄弟节点同量纲：w = 兄弟之和 * f/(1-f)，拖过分隔条也不会算串台。
+    // 不设数值下限：weight 只是相对值，劈几次之后绝对数会很小，按比例算照样对。
+    const weight = sumOther > 0 ? Math.max(1, Math.round((sumOther * f) / (1 - f))) : BORDER_SIZE[side];
+    layoutAction(
+      Actions.updateNodeAttributes(ts.getId(), {
+        weight,
+        minWidth: BORDER_MIN[side],
+        maxWidth: BORDER_MAX[side],
+      }).setUserData(FROM_APP),
+    );
+    if (sumOther <= 0) restoreCenterWeight(model);
+  };
+
+  /// 某条边该占多厚：优先这条边上钉住过的面板记下的份额（用户拖过分隔条就是他的），
+  /// 其次该边出厂的 BORDER_SIZE/CENTER_WEIGHT 配比——和 defaultLayout 里的比例是同一个数。
+  const dockFracFor = (side: DockSide): number => {
+    for (const st of Object.values(panelDock.current)) {
+      if (st.side === side && !st.hidden && st.frac && st.frac > 0.02 && st.frac < 0.8) return st.frac;
+    }
+    return BORDER_SIZE[side] / (BORDER_SIZE[side] + CENTER_WEIGHT);
   };
 
   /// tabset 在哪条边。这个 flexlayout 版本 tabset 在 DOM 里没有节点 id（只有 data-layout-path="/tsN"），
@@ -1733,7 +1845,7 @@ export default function App() {
     } else {
       m.doAction(Actions.moveNode(id, CENTER, DOCK_LOC[st.side], -1, true).setUserData(FROM_APP));
       const p = m.getNodeById(id)?.getParent();
-      if (p instanceof TabSetNode) adoptDockTabset(p, st.side);
+      if (p instanceof TabSetNode) adoptDockTabset(p, st.side, true);
     }
   };
 
@@ -1742,7 +1854,7 @@ export default function App() {
   /// 图钉画在面板自己标题栏的右上角（见 PanelPin），照 VS 的工具窗。
   const togglePin = (id: string) => {
     const st = dockState(id);
-    rememberDock(id, st.side, !st.hidden);
+    rememberDock(id, st.side, !st.hidden, hostFrac(model, id));
     placePanel(model, id);
     // 面板内容走 TabContentRenderer(React.memo)，跨宿主搬完不会重画，图钉会停在旧状态
     layoutRef.current?.redraw();
@@ -1844,7 +1956,15 @@ export default function App() {
             onTabSetPlaceHolder={(n) =>
               n.getId() === CENTER ? (
                 <div className="empty-state">
-                  <p>{t("app.emptyPrefix")}<IconPlus {...ink(13)} />{t("app.emptySuffix")}</p>
+                  <div className="empty-glyph">
+                    <IconTerminal2 {...ink(22)} />
+                  </div>
+                  <div className="empty-title">{t("app.emptyTitle")}</div>
+                  <div className="empty-desc">{t(treeHasSession(tree) ? "app.emptyDescHas" : "app.emptyDescNone")}</div>
+                  <button className="btn btn-primary empty-cta" onClick={() => setQuickConnect({ edit: undefined })}>
+                    <IconDeviceDesktopPlus {...ink(15)} />
+                    {t("app.emptyNew")}
+                  </button>
                 </div>
               ) : null
             }
@@ -1913,7 +2033,7 @@ export default function App() {
       )}
 
       {view.statusBar && <StatusBar info={statusInfo} tabCount={tabs.length} fontSize={fontSize} />}
-      {about && <AboutDialog version="0.1.0" onClose={() => setAbout(false)} />}
+      {about && <AboutDialog onClose={() => setAbout(false)} />}
     </div>
   );
 }

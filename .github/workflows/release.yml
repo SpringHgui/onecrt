@@ -1,0 +1,305 @@
+name: Release
+
+# 自动为 ShellX 构建三平台安装包，打 tag 时汇总成 GitHub Release 并挂上应用内更新清单。
+# 骨架照搬 BangHe 的 .github/workflows/release.yml：meta 解析版本 → 各平台 job 构建上传
+# → tag 触发时汇总发布。BangHe 特有的两块没搬：Gitee 国内镜像（那是磅房机无外网的场景）、
+# Microsoft Store 变体（商店上架流程），要加再照着补。
+#
+# 触发方式：
+#   1) 打 tag `v*`（如 v0.1.0）→ 三平台构建 + 建 Release 并上传产物与 latest.json
+#   2) 手动 workflow_dispatch → 只构建并上传 workflow artifacts（保留 90 天，不发 Release），
+#      用来试跑管线，不会污染面向用户的版本页
+#
+# 版本号唯一数据源是 package.json 的 `version`（tauri.conf.json / Cargo.toml 须与它同步，
+# meta job 会交叉校验，不一致直接失败）。关于框显示的运行版本走 getVersion()，
+# 读的就是 tauri.conf.json，所以代码里没有第四份抄本。tag 只决定是否发布 Release。
+#
+# 应用内更新（「帮助 → 关于 → 检查更新」）：
+#   - 构建期以 --config 注入 createUpdaterArtifacts，每个安装包旁多出同名 `.sig`
+#     （minisign 分离签名）。签名私钥只存在于 GitHub Secret TAURI_SIGNING_PRIVATE_KEY，
+#     它与 src-tauri/tauri.conf.json 的 plugins.updater.pubkey 配对——私钥一换，
+#     已装出去的老客户端验签即拒装。没配私钥，构建这步直接红（不静默出无签名包）。
+#   - release job 把版本 + 各平台签名 + 下载地址拼成 latest.json 随 Release 上传
+#     （scripts/release/gen_updater_manifest.py）；客户端按 plugins.updater.endpoints
+#     拉 releases/latest/download/latest.json（gh-proxy 镜像优先，直连兜底）。
+#   - Release 以 draft:false 直接发布，latest.json 与安装包匿名可达，改版号不用人工再点发布。
+#     前提是本仓保持 public：私有仓的 Release 产物匿名拉不到，端点会 404。
+#     仓库改名要同时改 src-tauri/tauri.conf.json 的 plugins.updater.endpoints（那里是写死的），
+#     老客户端仍在拉旧地址，所以改名等于断更——先确认没人用再动。
+#   - 各平台的自助升级能力不一样：Windows(NSIS) 与 Linux(AppImage) 可完整自更新；
+#     macOS 的自动更新按 Tauri 官方要求需要 Developer ID 签名，未签名包只能手动下 dmg，
+#     所以清单里仍给 darwin 槽留位（将来接公证不用改工作流），但正文里写明了这一点。
+#
+# 产物命名（Release 资产名，从 bundler 的默认名规整过来）：
+#   shellx-<ver>-windows-x64-setup.exe(.sig)
+#   shellx-<ver>-linux-x64.deb / shellx-<ver>-linux-x64.AppImage(.sig)
+#   shellx-<ver>-macos-arm64.dmg / shellx-<ver>-macos-arm64.app.tar.gz(.sig)
+#   规整成 ASCII 定名有两个理由：Release 资产链接不带中文/空格免做 URL 编码；
+#   gen_updater_manifest.py 靠文件名后缀认平台（它同时把 bundler 默认的 `shellx_<ver>_amd64`
+#   这类带下划线的写法一并吸收掉）。
+#
+# 其他说明：
+#   - macOS 只出 Apple Silicon（macos-latest 是 arm64 runner）。要补 Intel：加一个
+#     `runs-on: macos-13` 的 job，构建参数不变，产物改名成 -macos-x64.*，
+#     再把 release job 的 --require 追加 darwin-x86_64。
+#   - 未做代码签名（Windows 无证书、macOS 无公证），用户首启会遇 SmartScreen / Gatekeeper 提示。
+#   - Linux 的 AppImage 打包工具本身是个 AppImage，runner 上没有 FUSE，靠
+#     APPIMAGE_EXTRACT_AND_RUN=1 走解包运行模式。
+#   - Release 正文由 scripts/release/gen_release_notes.py 生成（下载表带大小与 SHA256 前缀 +
+#     提交清单），本地可预览：
+#     python scripts/release/gen_release_notes.py --tag v0.1.0 --version 0.1.0 \\
+#       --repo SpringHgui/onecrt --artifacts-dir .scratch/artifacts --output .scratch/body.md
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  meta:
+    name: 解析版本号
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.ver.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: ver
+        run: |
+          set -euo pipefail
+          v="$(node -p "require('./package.json').version")"
+          t="$(node -p "JSON.parse(require('fs').readFileSync('src-tauri/tauri.conf.json','utf8')).version")"
+          c="$(node -p "require('fs').readFileSync('src-tauri/Cargo.toml','utf8').match(/^version = \"([^\"]+)\"/m)[1]")"
+          if [ "$v" != "$t" ] || [ "$v" != "$c" ]; then
+            echo "版本三处不同步: package.json=$v tauri.conf.json=$t Cargo.toml=$c"; exit 1
+          fi
+          if [[ "${{ github.ref_type }}" == "tag" && "${{ github.ref_name }}" != "v$v" ]]; then
+            echo "tag ${{ github.ref_name }} 与版本 v$v 不一致，请对齐后重新打 tag"; exit 1
+          fi
+          echo "version=$v" >> "$GITHUB_OUTPUT"
+          echo "版本号: $v"
+
+  build-windows:
+    name: Windows x64（NSIS）
+    needs: meta
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: 依赖安装
+        run: npm ci
+
+      # 与本地同路径：tauri build 自带 beforeBuildCommand（tsc && vite build）。
+      # --bundles nsis 只出主安装包；bundler 默认的 msi 一并出会把 Release 资产翻倍，没必要。
+      - name: Tauri 构建（前端 + Release 二进制 + NSIS 打包 + 更新包签名）
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          # 密钥生成时未设口令：显式给空串，避免 bundler 转 prompt（CI 里没人应答）
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+        run: npx tauri build --bundles nsis --config '{"bundle":{"createUpdaterArtifacts":true}}'
+
+      - name: 校验并规整产物名
+        shell: pwsh
+        run: |
+          $ver = "${{ needs.meta.outputs.version }}"
+          $bundle = "src-tauri/target/release/bundle"
+          $exe = Get-ChildItem $bundle -Recurse -Filter "*_x64-setup.exe" | Select-Object -First 1
+          if (-not $exe) { Write-Error "bundle 下未找到 *-x64-setup.exe"; exit 1 }
+          $sig = Get-ChildItem $bundle -Recurse -Filter "*_x64-setup.exe.sig" | Select-Object -First 1
+          if (-not $sig) { Write-Error "未找到更新包签名 *_x64-setup.exe.sig——TAURI_SIGNING_PRIVATE_KEY 没配或 createUpdaterArtifacts 没开"; exit 1 }
+          New-Item -ItemType Directory -Force release | Out-Null
+          Copy-Item $exe.FullName "release/shellx-$ver-windows-x64-setup.exe"
+          Copy-Item $sig.FullName "release/shellx-$ver-windows-x64-setup.exe.sig"
+          $mb = [math]::Round($exe.Length / 1MB, 1)
+          "打包完成: shellx-$ver-windows-x64-setup.exe ($mb MB) + 签名"
+          # 主包应是 MB 量级；哪天回到几百 MB 说明有资产被误打进了安装包
+          if ($exe.Length -gt 120MB) { Write-Error "主包体积异常 ($mb MB)"; exit 1 }
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: shellx-windows-x64
+          path: release/shellx-*
+          if-no-files-found: error
+
+  build-linux:
+    name: Linux x64（deb + AppImage）
+    needs: meta
+    runs-on: ubuntu-latest
+    env:
+      # appimagetool 自己就是个 AppImage；runner 无 FUSE，让它解包后运行
+      APPIMAGE_EXTRACT_AND_RUN: "1"
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: 安装 Tauri Linux 构建依赖
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            libwebkit2gtk-4.1-dev build-essential curl wget file \
+            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev patchelf
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: 依赖安装
+        run: npm ci
+
+      # rpm 不出：目标机是 Debian/Ubuntu 与容器为主，rpm 那套依赖列表没人核对过，
+      # 与其发个装不上的包不如不发。要加就在 --bundles 后补 rpm 并同步改名步骤。
+      - name: Tauri 构建（deb + AppImage + 更新包签名）
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+        run: npx tauri build --bundles deb,appimage --config '{"bundle":{"createUpdaterArtifacts":true}}'
+
+      - name: 校验并规整产物名
+        run: |
+          set -euo pipefail
+          ver="${{ needs.meta.outputs.version }}"
+          bundle="src-tauri/target/release/bundle"
+          mkdir -p release
+          deb="$(find "$bundle" -name '*.deb' | head -1)"
+          appi="$(find "$bundle" -name '*.AppImage' ! -name '*.sig' | head -1)"
+          sig="$(find "$bundle" -name '*.AppImage.sig' | head -1)"
+          for f in "$deb" "$appi" "$sig"; do
+            [ -n "$f" ] || { echo "bundle 下缺产物：deb/AppImage/AppImage.sig"; exit 1; }
+          done
+          cp "$deb"  "release/shellx-$ver-linux-x64.deb"
+          cp "$appi" "release/shellx-$ver-linux-x64.AppImage"
+          cp "$sig"  "release/shellx-$ver-linux-x64.AppImage.sig"
+          du -h release/*
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: shellx-linux-x64
+          path: release/shellx-*
+          if-no-files-found: error
+
+  build-macos:
+    name: macOS Apple Silicon（dmg + app.tar.gz）
+    needs: meta
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: 依赖安装
+        run: npm ci
+
+      # app 出 .app.tar.gz（更新通道要的格式），dmg 给人手动装。
+      # 没有 APPLE_CERTIFICATE 等签名凭据时 bundler 只打不签，构建照样绿。
+      - name: Tauri 构建（app + dmg + 更新包签名）
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ""
+        run: npx tauri build --bundles app,dmg --config '{"bundle":{"createUpdaterArtifacts":true}}'
+
+      - name: 校验并规整产物名
+        run: |
+          set -euo pipefail
+          ver="${{ needs.meta.outputs.version }}"
+          bundle="src-tauri/target/release/bundle"
+          mkdir -p release
+          tar="$(find "$bundle" -name '*.app.tar.gz' | head -1)"
+          sig="$(find "$bundle" -name '*.app.tar.gz.sig' | head -1)"
+          dmg="$(find "$bundle" -name '*.dmg' | head -1)"
+          for f in "$tar" "$sig" "$dmg"; do
+            [ -n "$f" ] || { echo "bundle 下缺产物：app.tar.gz/app.tar.gz.sig/dmg"; exit 1; }
+          done
+          cp "$tar" "release/shellx-$ver-macos-arm64.app.tar.gz"
+          cp "$sig" "release/shellx-$ver-macos-arm64.app.tar.gz.sig"
+          cp "$dmg" "release/shellx-$ver-macos-arm64.dmg"
+          du -h release/*
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: shellx-macos-arm64
+          path: release/shellx-*
+          if-no-files-found: error
+
+  release:
+    name: 发布 GitHub Release
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [meta, build-windows, build-linux, build-macos]
+    runs-on: ubuntu-latest
+    steps:
+      # 生成提交清单要读「上一个 tag → 当前 tag」的完整历史，浅克隆拿不到。
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: 下载构建产物
+        uses: actions/download-artifact@v4
+        with:
+          pattern: shellx-*
+          path: artifacts
+          merge-multiple: true
+
+      - name: 生成更新清单 latest.json
+        run: |
+          python3 scripts/release/gen_updater_manifest.py \
+            --version "${{ needs.meta.outputs.version }}" \
+            --tag "${{ github.ref_name }}" \
+            --repo "${{ github.repository }}" \
+            --artifacts-dir artifacts \
+            --require windows-x86_64,linux-x86_64,darwin-aarch64 \
+            --output artifacts/latest.json
+          echo "----- latest.json（签名截断显示）-----"
+          python3 -c "import json;d=json.load(open('artifacts/latest.json'));d['platforms']={k:{**v,'signature':v['signature'][:24]+'…'} for k,v in d['platforms'].items()};print(json.dumps(d,indent=2))"
+
+      - name: 生成 Release 正文（下载表格 + 提交清单）
+        run: |
+          python3 scripts/release/gen_release_notes.py \
+            --tag "${{ github.ref_name }}" \
+            --version "${{ needs.meta.outputs.version }}" \
+            --repo "${{ github.repository }}" \
+            --artifacts-dir artifacts \
+            --output release_body.md
+          echo "----- release_body.md -----"
+          cat release_body.md
+
+      - name: 发布 GitHub Release（含产物与在线更新清单）
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: ShellX ${{ needs.meta.outputs.version }}
+          body_path: release_body.md
+          draft: false
+          prerelease: false
+          files: artifacts/*

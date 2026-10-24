@@ -23,6 +23,20 @@ npm run tauri build    # 打包
 
 Rust 侧 `russh` 关闭了默认特性并使用 `ring` 作为加密后端（`aws-lc-rs` 在 Windows 上需要 NASM）。
 
+## 发布
+
+打 tag `v*` 触发 `.github/workflows/release.yml`：Windows（NSIS）、Linux（deb + AppImage）、macOS Apple Silicon（dmg + app.tar.gz）三个 job 并行构建，产物汇总成一条 GitHub Release，正文是带大小与 SHA256 的下载表加本次提交清单。手动 `workflow_dispatch` 只出 workflow 产物、不发版，用来试跑管线。
+
+版本号只认 `package.json`，`src-tauri/tauri.conf.json` 与 `src-tauri/Cargo.toml` 必须与它一致（meta job 交叉校验，不一致直接失败）。
+
+应用内更新（帮助 → 关于 → 检查更新）读同一 Release 的 `latest.json`，安装包由 minisign 分离签名。一次性配置：仓库 Secret 加 `TAURI_SIGNING_PRIVATE_KEY`（`npx tauri signer generate --ci -w ~/.tauri/shellx_updater.key` 生成的私钥内容），公钥写进 `src-tauri/tauri.conf.json` 的 `plugins.updater.pubkey`；私钥丢了旧客户端就再也收不到更新。本地要出签名包：
+
+```bash
+TAURI_SIGNING_PRIVATE_KEY=~/.tauri/shellx_updater.key npm run tauri build -- --config '{"bundle":{"createUpdaterArtifacts":true}}'
+```
+
+Windows 与 Linux(AppImage) 可完整自助升级；macOS 的自动更新按 Tauri 要求需 Developer ID 签名，未签名的包请手动下载 dmg。`.github/workflows/ci.yml` 是每次 push / PR 的门：`tsc` + `vite build` + 中英文案词典核对 + `cargo check` + `cargo test`。
+
 ## 外观
 
 支持深色 / 明亮两套主题，侧栏工具条最右侧的日/月图标按钮切换，选择记在 `localStorage`（`shellx.theme`）；原生标题栏随 `window.setTheme` 同步。两套色值都按参考截图逐像素取样得到，同属冷调（蓝灰底、不带米色），深色是「外框亮、内容层暗」，明亮是「外框暗、内容层纯白」。配色 token 集中在 `src/styles.css`：`:root` 是深色，`[data-theme="light"]` 覆盖同名变量（`--bg` / `--bg-content` / `--bg-selected` / `--border` / `--text*` / `--accent` / `--scrim` / `--shadow-*` 等），加新主题只动这一处。xterm 不再单独写死色值，`src/Terminal.tsx` 从同一组 CSS 变量读背景/前景/光标/选区与 ANSI 色，切主题时实时更新，两边背景天然一致。

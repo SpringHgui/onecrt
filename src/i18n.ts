@@ -36,6 +36,7 @@ const zh: Dict = {
   "menu.view.sessionManager": "会话管理器",
   "menu.view.cmdManager": "命令管理器",
   "menu.view.filePanel": "文件面板 (SFTP)",
+  "menu.view.perfPanel": "性能监控",
   "menu.view.transfers": "传输列表",
   "menu.view.resetLayout": "重置窗口布局",
   "menu.view.zoomIn": "放大",
@@ -52,6 +53,11 @@ const zh: Dict = {
   "about.title": "关于 ShellX",
   "about.desc": "跨平台 SSH 客户端：Tauri 2 + Rust（russh）+ React + xterm.js。",
   "about.note": "会话与命令保存在 %APPDATA%\\shellx\\，口令明文存储，仅面向内网运维。",
+  "about.checkUpdate": "检查更新",
+  "about.checking": "正在检查更新…",
+  "about.latest": "当前已是最新版本",
+  "about.installing": "正在下载并安装 {ver}，完成后自动重启",
+  "about.error": "检查更新失败：无网络、仓库不可达或当前不是安装包运行的版本",
 
   // 状态栏
   "status.connecting": "连接中",
@@ -189,7 +195,13 @@ const zh: Dict = {
   "sm.toDark": "切换到深色主题",
   "sm.filter": "按文件夹/会话名筛选",
 
+  // 认证方式（会话里存的是英文方法名，这里只是显示用）
+  "auth.PublicKey": "公钥",
+  "auth.Password": "密码",
+  "auth.Keyboard Interactive": "键盘交互式",
+
   // 文件面板
+  "fp.title": "文件面板",
   "fp.up": "上一级",
   "fp.refresh": "刷新",
   "fp.pathPlaceholder": "路径，回车跳转",
@@ -214,8 +226,10 @@ const zh: Dict = {
   "fp.sftpError": "SFTP 连接失败：{e}",
 
   // 空态
-  "app.emptyPrefix": "双击左侧会话或点击 ",
-  "app.emptySuffix": " 新建连接",
+  "app.emptyTitle": "暂无终端会话",
+  "app.emptyDescHas": "双击左侧会话即可连接",
+  "app.emptyDescNone": "还没有保存的会话",
+  "app.emptyNew": "新建连接",
 
   // flexlayout 内建串
   "fl.dockFloatToLayout": "拖回主窗口停靠",
@@ -270,6 +284,29 @@ const zh: Dict = {
   "ctx.sessionOptions": "会话选项…",
   "ctx.saveSession": "保存会话…",
   "ctx.sendCommandsToGroup": "向此组发送命令",
+
+  // 性能面板
+  "perf.title": "性能",
+  "perf.close": "关闭性能面板",
+  "perf.intervalTip": "采样间隔",
+  "perf.intervalOpt": "{s} 秒",
+  "perf.noTab": "没有活动标签页：先连上一台服务器",
+  "perf.connecting": "连接中…",
+  "perf.waiting": "采集中，等第二个采样点",
+  "perf.failed": "采样失败",
+  "perf.noData": "目标机没有回传采样：需要 Linux 的 /proc 与 sh",
+  "perf.cpu": "CPU",
+  "perf.mem": "内存",
+  "perf.net": "网络",
+  "perf.disk": "磁盘 /",
+  "perf.loadTip": "负载",
+  "perf.memUsedShort": "已用",
+  "perf.netSub": "下行 / 上行",
+  "perf.peak": "峰值",
+  "perf.diskFree": "可用",
+  "perf.up": "运行",
+  "perf.samples": "个采样",
+  "perf.footSource": "数据取自目标机的 /proc 与 df",
 };
 
 const en: Dict = {
@@ -300,6 +337,7 @@ const en: Dict = {
   "menu.view.sessionManager": "Session Manager",
   "menu.view.cmdManager": "Command Manager",
   "menu.view.filePanel": "File Panel (SFTP)",
+  "menu.view.perfPanel": "Performance",
   "menu.view.transfers": "Transfer List",
   "menu.view.resetLayout": "Reset Window Layout",
   "menu.view.zoomIn": "Zoom In",
@@ -315,6 +353,11 @@ const en: Dict = {
   "about.title": "About ShellX",
   "about.desc": "Cross-platform SSH client: Tauri 2 + Rust (russh) + React + xterm.js.",
   "about.note": "Sessions and commands are stored in %APPDATA%\\shellx\\; passwords in plaintext, for intranet ops use only.",
+  "about.checkUpdate": "Check for updates",
+  "about.checking": "Checking for updates…",
+  "about.latest": "You're on the latest version",
+  "about.installing": "Downloading and installing {ver}, the app will restart when done",
+  "about.error": "Update check failed: no network, repository unreachable, or not running from an installed build",
 
   "status.connecting": "Connecting",
   "status.ready": "Connected",
@@ -439,6 +482,11 @@ const en: Dict = {
   "sm.toDark": "Switch to dark theme",
   "sm.filter": "Filter by folder/session name",
 
+  "auth.PublicKey": "Public Key",
+  "auth.Password": "Password",
+  "auth.Keyboard Interactive": "Keyboard Interactive",
+
+  "fp.title": "File Panel",
   "fp.up": "Up one level",
   "fp.refresh": "Refresh",
   "fp.pathPlaceholder": "Path, press Enter to go",
@@ -462,8 +510,10 @@ const en: Dict = {
   "fp.footHint": "{conn} · select a side to use new/rename/delete",
   "fp.sftpError": "SFTP connection failed: {e}",
 
-  "app.emptyPrefix": "Double-click a session on the left or click ",
-  "app.emptySuffix": " to create a connection",
+  "app.emptyTitle": "No terminal sessions",
+  "app.emptyDescHas": "Double-click a session on the left to connect",
+  "app.emptyDescNone": "No saved sessions yet",
+  "app.emptyNew": "New connection",
 
   "fl.dockFloatToLayout": "Dock back to main window",
   "fl.dockFloatTabs": "Dock ? tabs back to main window",
@@ -514,9 +564,40 @@ const en: Dict = {
   "ctx.sessionOptions": "Session Options...",
   "ctx.saveSession": "Save Session...",
   "ctx.sendCommandsToGroup": "Send Commands to This Group",
+
+  // Performance panel
+  "perf.title": "Performance",
+  "perf.close": "Close performance panel",
+  "perf.intervalTip": "Sample interval",
+  "perf.intervalOpt": "{s}s",
+  "perf.noTab": "No active tab: connect to a server first",
+  "perf.connecting": "Connecting…",
+  "perf.waiting": "Sampling, waiting for the second point",
+  "perf.failed": "Sampling failed",
+  "perf.noData": "No samples from this host: needs Linux /proc and sh",
+  "perf.cpu": "CPU",
+  "perf.mem": "Memory",
+  "perf.net": "Network",
+  "perf.disk": "Disk /",
+  "perf.loadTip": "Load",
+  "perf.memUsedShort": "used",
+  "perf.netSub": "rx / tx",
+  "perf.peak": "peak",
+  "perf.diskFree": "free",
+  "perf.up": "up",
+  "perf.samples": "samples",
+  "perf.footSource": "Read from the target's /proc and df",
 };
 
 const dicts: Record<Locale, Dict> = { zh, en };
+
+export const LOCALES: Locale[] = ["zh", "en"];
+
+/// 指定语言的文案，缺失时返回 undefined（不退回当前语言）：
+/// 判断"这个名字是不是某语言的出厂默认名"要用它，见 App 里的面板页签改名。
+export function tLocale(l: Locale, key: string): string | undefined {
+  return dicts[l][key];
+}
 
 function detect(): Locale {
   const saved = localStorage.getItem(STORE_KEY);

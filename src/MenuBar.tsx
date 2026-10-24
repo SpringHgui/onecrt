@@ -1,5 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { IconX } from "@tabler/icons-react";
+import { getVersion } from "@tauri-apps/api/app";
+import { check } from "@tauri-apps/plugin-updater";
+import { relaunch } from "@tauri-apps/plugin-process";
 import { ink } from "./icons";
 import ContextMenu, { MenuItem } from "./ContextMenu";
 import { useI18n } from "./i18n";
@@ -130,8 +133,36 @@ export function useMenuShortcuts(h: ShortcutHandlers) {
   }, []);
 }
 
-export function AboutDialog({ version, onClose }: { version: string; onClose(): void }) {
+export function AboutDialog({ onClose }: { onClose(): void }) {
   const { t } = useI18n();
+  /// 版本取运行时注入的值（唯一数据源是 tauri.conf.json），别再在代码里抄一份常量
+  const [version, setVersion] = useState("");
+  const [upd, setUpd] = useState<"idle" | "checking" | "installing" | "latest" | "error">("idle");
+  const [pending, setPending] = useState("");
+
+  useEffect(() => {
+    getVersion().then(setVersion, () => setVersion(""));
+  }, []);
+
+  const checkUpdate = async () => {
+    setUpd("checking");
+    try {
+      const update = await check();
+      if (!update) {
+        setUpd("latest");
+        return;
+      }
+      setPending(update.version);
+      setUpd("installing");
+      await update.downloadAndInstall();
+      /// 装完必须重启进程才换到新包（Linux 的 AppImage 尤其如此），所以这里直接 relaunch
+      await relaunch();
+    } catch (e) {
+      console.error("updater", e);
+      setUpd("error");
+    }
+  };
+
   return (
     <div className="dialog-overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
       <div className="dialog dialog-sm">
@@ -147,8 +178,19 @@ export function AboutDialog({ version, onClose }: { version: string; onClose(): 
           </div>
           <div className="hint">{t("about.desc")}</div>
           <div className="hint">{t("about.note")}</div>
+          {upd !== "idle" && (
+            <div className="hint">
+              {upd === "checking" && t("about.checking")}
+              {upd === "latest" && t("about.latest")}
+              {upd === "installing" && t("about.installing", { ver: pending })}
+              {upd === "error" && t("about.error")}
+            </div>
+          )}
         </div>
         <div className="dialog-footer">
+          <button className="btn" disabled={upd === "checking" || upd === "installing"} onClick={checkUpdate}>
+            {t("about.checkUpdate")}
+          </button>
           <button className="btn btn-primary" onClick={onClose}>
             {t("common.ok")}
           </button>
