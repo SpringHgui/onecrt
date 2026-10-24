@@ -81,106 +81,6 @@ pub struct CommandTree {
     pub commands: Vec<CmdNode>,
 }
 
-fn node(id: &str, name: &str, host: &str) -> Node {
-    Node::Session(SshSession {
-        id: id.into(),
-        name: name.into(),
-        host: host.into(),
-        port: 22,
-        username: "root".into(),
-        password: String::new(),
-        key_path: String::new(),
-        auth: default_auth(),
-    })
-}
-
-fn folder(id: &str, name: &str, children: Vec<Node>) -> Node {
-    Node::Folder {
-        id: id.into(),
-        name: name.into(),
-        expanded: true,
-        children,
-    }
-}
-
-fn seed() -> SessionTree {
-    SessionTree {
-        sessions: vec![
-            folder("f-micro", "0. 微服务", vec![]),
-            folder(
-                "f-yibu",
-                "1.一部",
-                vec![
-                    node("s-p1-1", "p1-1 116.62.54.209 master", "116.62.54.209"),
-                    node("s-p1-2", "p1-2 121.43.50.248", "121.43.50.248"),
-                    node("s-p1-3", "p1-3 118.178.254.139", "118.178.254.139"),
-                    node("s-p1-4", "p1-4 116.62.33.129", "116.62.33.129"),
-                ],
-            ),
-            folder(
-                "f-erbu",
-                "1.二部",
-                vec![
-                    node("s-p2-1", "p2-1 118.178.253.30 master", "118.178.253.30"),
-                    node("s-p2-2", "p2-2 118.31.45.207", "118.31.45.207"),
-                    node("s-p2-3", "p2-3 116.62.53.203", "116.62.53.203"),
-                    node("s-p2-4", "p2-4 120.26.217.17", "120.26.217.17"),
-                ],
-            ),
-            folder(
-                "f-benbu",
-                "1.本部",
-                vec![
-                    node("s-p0-1", "p0-1 121.43.37.183 master", "121.43.37.183"),
-                    node("s-p0-2", "p0-2 120.27.137.197", "120.27.137.197"),
-                    node("s-p0-3", "p0-3 118.31.112.157", "118.31.112.157"),
-                    node("s-p0-4", "p0-4 121.43.36.71", "121.43.36.71"),
-                ],
-            ),
-            folder("f-ali", "1.阿里云", vec![]),
-            folder(
-                "f-vps",
-                "Vps",
-                vec![
-                    node("s-vps-1", "10.70.48.213", "10.70.48.213"),
-                    node("s-vps-2", "10.70.49.165", "10.70.49.165"),
-                    node("s-vps-3", "10.70.50.201", "10.70.50.201"),
-                    node("s-ali-1", "101.37.166.120 阿里云", "101.37.166.120"),
-                    node("s-hk-1", "119.28.25.90 香港", "119.28.25.90"),
-                    node("s-vps-4", "49.235.101.10", "49.235.101.10"),
-                    node("s-vps-5", "8.211.183.139", "8.211.183.139"),
-                    node("s-bxz", "dbxz1-1.bx.com.cn", "dbxz1-1.bx.com.cn"),
-                ],
-            ),
-            folder("f-xinyang", "信阳钢铁", vec![]),
-            folder(
-                "f-lan",
-                "内网",
-                vec![
-                    node("s-lan-1", "10.70.34.73", "10.70.34.73"),
-                    node("s-lan-2", "10.70.43.73", "10.70.43.73"),
-                    node("s-lan-3", "10.70.50.177", "10.70.50.177"),
-                    node("s-lan-4", "192.168.0.18", "192.168.0.18"),
-                    node("s-lan-5", "192.168.0.198", "192.168.0.198"),
-                    node("s-gitlab", "192.168.0.25 gitlab", "192.168.0.25"),
-                    node("s-lan-6", "192.168.0.253", "192.168.0.253"),
-                    node("s-lan-7", "192.168.0.93", "192.168.0.93"),
-                ],
-            ),
-            folder("f-pre", "准生产", vec![]),
-            folder("f-private", "私有化阿里云", vec![]),
-            folder(
-                "f-cang",
-                "车场",
-                vec![
-                    node("s-c-1", "10.64.1.55", "10.64.1.55"),
-                    node("s-c-2", "10.70.39.121", "10.70.39.121"),
-                ],
-            ),
-        ],
-    }
-}
-
 /// 口令用 DPAPI 落盘加密：密钥由当前 Windows 登录用户持有，sessions.json 被拷走也只是密文。
 /// 解不开（换机器/换用户/配置文件损坏）时按无口令处理，连接时弹框补凭据。
 mod secret {
@@ -273,7 +173,7 @@ fn store_path() -> Result<PathBuf, String> {
 pub fn load_tree() -> Result<SessionTree, String> {
     let path = store_path()?;
     if !path.exists() {
-        save_tree(&seed())?;
+        return Ok(SessionTree::default());
     }
     let text = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
     let mut tree: SessionTree = serde_json::from_str(&text).map_err(|e| format!("会话文件损坏: {e}"))?;
