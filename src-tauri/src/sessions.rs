@@ -81,79 +81,116 @@ pub struct CommandTree {
     pub commands: Vec<CmdNode>,
 }
 
-/// 口令用 DPAPI 落盘加密：密钥由当前 Windows 登录用户持有，sessions.json 被拷走也只是密文。
+/// 口令落盘加密：Windows 走 DPAPI（密钥由当前登录用户持有，sessions.json 被拷走也只是密文），
 /// 解不开（换机器/换用户/配置文件损坏）时按无口令处理，连接时弹框补凭据。
+/// 其余平台没有可移植的系统级密钥，退回明文；`dpapi:` 密文在这些平台同样解不开，按无口令处理。
 mod secret {
-    use windows::Win32::Foundation::{LocalFree, HLOCAL};
-    use windows::Win32::Security::Cryptography::{CryptProtectData, CryptUnprotectData, CRYPT_INTEGER_BLOB};
-
     const PREFIX: &str = "dpapi:";
-
-    fn hex(bytes: &[u8]) -> String {
-        bytes.iter().map(|b| format!("{b:02x}")).collect()
-    }
-
-    fn unhex(text: &str) -> Option<Vec<u8>> {
-        if text.len() % 2 != 0 {
-            return None;
-        }
-        (0..text.len() / 2)
-            .map(|i| u8::from_str_radix(&text[i * 2..i * 2 + 2], 16).ok())
-            .collect()
-    }
-
-    pub fn protect(plain: &str) -> Result<String, String> {
-        let mut bytes = plain.as_bytes().to_vec();
-        let input = CRYPT_INTEGER_BLOB {
-            cbData: bytes.len() as u32,
-            pbData: bytes.as_mut_ptr(),
-        };
-        let mut output = CRYPT_INTEGER_BLOB {
-            cbData: 0,
-            pbData: std::ptr::null_mut(),
-        };
-        unsafe {
-            CryptProtectData(&input, None, None, None, None, 0, &mut output)
-                .map_err(|e| format!("口令加密失败: {e}"))?;
-            let blob = std::slice::from_raw_parts(output.pbData, output.cbData as usize).to_vec();
-            LocalFree(Some(HLOCAL(output.pbData as *mut _)));
-            Ok(format!("{PREFIX}{}", hex(&blob)))
-        }
-    }
 
     pub fn is_protected(stored: &str) -> bool {
         stored.starts_with(PREFIX)
     }
 
+    #[cfg(windows)]
+    pub fn protect(plain: &str) -> Result<String, String> {
+        dpapi::protect(plain)
+    }
+
+    #[cfg(not(windows))]
+    pub fn protect(plain: &str) -> Result<String, String> {
+        Ok(plain.to_string())
+    }
+
+    #[cfg(windows)]
     pub fn unprotect(stored: &str) -> String {
-        let Some(rest) = stored.strip_prefix(PREFIX) else {
-            return stored.to_string();
+        dpapi::unprotect(stored)
+    }
+
+    #[cfg(not(windows))]
+    pub fn unprotect(stored: &str) -> String {
+        if is_protected(stored) {
+            String::new()
+        } else {
+            stored.to_string()
+        }
+    }
+
+    #[cfg(windows)]
+    mod dpapi {
+        use super::PREFIX;
+        use windows::Win32::Foundation::{LocalFree, HLOCAL};
+        use windows::Win32::Security::Cryptography::{
+            CryptProtectData, CryptUnprotectData, CRYPT_INTEGER_BLOB,
         };
-        let Some(mut bytes) = unhex(rest) else {
-            return String::new();
-        };
-        let input = CRYPT_INTEGER_BLOB {
-            cbData: bytes.len() as u32,
-            pbData: bytes.as_mut_ptr(),
-        };
-        let mut output = CRYPT_INTEGER_BLOB {
-            cbData: 0,
-            pbData: std::ptr::null_mut(),
-        };
-        unsafe {
-            if CryptUnprotectData(&input, None, None, None, None, 0, &mut output).is_err() {
-                return String::new();
+
+        fn hex(bytes: &[u8]) -> String {
+            bytes.iter().map(|b| format!("{b:02x}")).collect()
+        }
+
+        fn unhex(text: &str) -> Option<Vec<u8>> {
+            if text.len() % 2 != 0 {
+                return None;
             }
-            let plain =
-                String::from_utf8_lossy(std::slice::from_raw_parts(output.pbData, output.cbData as usize))
-                    .into_owned();
-            LocalFree(Some(HLOCAL(output.pbData as *mut _)));
-            plain
+            (0..text.len() / 2)
+                .map(|i| u8::from_str_radix(&text[i * 2..i * 2 + 2], 16).ok())
+                .collect()
+        }
+
+        pub fn protect(plain: &str) -> Result<String, String> {
+            let mut bytes = plain.as_bytes().to_vec();
+            let input = CRYPT_INTEGER_BLOB {
+                cbData: bytes.len() as u32,
+                pbData: bytes.as_mut_ptr(),
+            };
+            let mut output = CRYPT_INTEGER_BLOB {
+                cbData: 0,
+                pbData: std::ptr::null_mut(),
+            };
+            unsafe {
+                CryptProtectData(&input, None, None, None, None, 0, &mut output)
+                    .map_err(|e| format!("口令加密失败: {e}"))?;
+                let blob =
+                    std::slice::from_raw_parts(output.pbData, output.cbData as usize).to_vec();
+                LocalFree(Some(HLOCAL(output.pbData as *mut _)));
+                Ok(format!("{PREFIX}{}", hex(&blob)))
+            }
+        }
+
+        pub fn unprotect(stored: &str) -> String {
+            let Some(rest) = stored.strip_prefix(PREFIX) else {
+                return stored.to_string();
+            };
+            let Some(mut bytes) = unhex(rest) else {
+                return String::new();
+            };
+            let input = CRYPT_INTEGER_BLOB {
+                cbData: bytes.len() as u32,
+                pbData: bytes.as_mut_ptr(),
+            };
+            let mut output = CRYPT_INTEGER_BLOB {
+                cbData: 0,
+                pbData: std::ptr::null_mut(),
+            };
+            unsafe {
+                if CryptUnprotectData(&input, None, None, None, None, 0, &mut output).is_err() {
+                    return String::new();
+                }
+                let plain = String::from_utf8_lossy(std::slice::from_raw_parts(
+                    output.pbData,
+                    output.cbData as usize,
+                ))
+                .into_owned();
+                LocalFree(Some(HLOCAL(output.pbData as *mut _)));
+                plain
+            }
         }
     }
 }
 
-fn map_passwords(nodes: &mut [Node], f: &(impl Fn(&str) -> Result<String, String>)) -> Result<(), String> {
+fn map_passwords(
+    nodes: &mut [Node],
+    f: &impl Fn(&str) -> Result<String, String>,
+) -> Result<(), String> {
     for n in nodes.iter_mut() {
         match n {
             Node::Folder { children, .. } => map_passwords(children, f)?,
@@ -176,7 +213,8 @@ pub fn load_tree() -> Result<SessionTree, String> {
         return Ok(SessionTree::default());
     }
     let text = std::fs::read_to_string(&path).map_err(|e| e.to_string())?;
-    let mut tree: SessionTree = serde_json::from_str(&text).map_err(|e| format!("会话文件损坏: {e}"))?;
+    let mut tree: SessionTree =
+        serde_json::from_str(&text).map_err(|e| format!("会话文件损坏: {e}"))?;
     map_passwords(&mut tree.sessions, &|p| Ok(secret::unprotect(p)))?;
     Ok(tree)
 }
@@ -325,11 +363,20 @@ mod tests {
         assert!(parse_commands("{ not json").is_err());
     }
 
+    #[cfg(windows)]
     #[test]
     fn 口令落盘为dpapi密文且能解回原文() {
         let encrypted = secret::protect("p@ss 中文").unwrap();
         assert!(secret::is_protected(&encrypted));
         assert_eq!(secret::unprotect(&encrypted), "p@ss 中文");
+    }
+
+    #[cfg(not(windows))]
+    #[test]
+    fn 非windows平台口令明文落盘() {
+        assert_eq!(secret::protect("p@ss 中文").unwrap(), "p@ss 中文");
+        assert!(!secret::is_protected(&secret::protect("x").unwrap()));
+        assert_eq!(secret::unprotect("p@ss 中文"), "p@ss 中文");
     }
 
     #[test]

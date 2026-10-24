@@ -29,10 +29,14 @@ anyhow = "1"
 dirs = "6"
 russh-sftp = "3.0.1"
 arboard = "3.6"
-windows = { version = "0.62", features = ["Win32_Security_Cryptography"] }
 rfd = "0.15"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
+
+# DPAPI 只在 Windows 上有；不门控的话 Linux/macOS 构建会去编译 windows → windows-future，
+# 后者在非 Windows 目标上过不了编译（CI 首轮就是这里红的）。
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.62", features = ["Win32_Security_Cryptography"] }
 
 
 # Read the optimization guideline for more details: https://tauri.app/concept/size/#cargo-configuration

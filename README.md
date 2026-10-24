@@ -59,7 +59,7 @@ cd src-tauri && cargo test
 
 ## 数据位置
 
-会话与命令保存在 `dirs::config_dir()/shellx/`（Windows：`%APPDATA%\shellx\`）下的 `sessions.json`、`commands.json`。密码与私钥路径明文存放，仅面向内网运维场景，请勿用于对外分发的机器。
+会话与命令保存在 `dirs::config_dir()/shellx/`（Windows：`%APPDATA%\shellx\`）下的 `sessions.json`、`commands.json`。口令在 Windows 上经 DPAPI 加密后落盘（存成 `dpapi:` 前缀的十六进制，密钥由当前登录用户持有），私钥路径明文；Linux 与 macOS 没有可移植的系统级密钥，口令明文存放。仅面向内网运维场景，请勿用于对外分发的机器。
 
 ## 已知取舍
 
