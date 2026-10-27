@@ -275,7 +275,9 @@ body {
 
 .terminal-host {
   position: absolute;
-  inset: 6px 0;
+  /* 左侧留 8px 起始间隙：文字贴着面板左缘太挤（上下已有 6px，取整到 8px 更像一条边距）。
+     间隙开在宿主上而不是 xterm 内部，光标、选区与整行高亮仍由 xterm 自己排版，不会错位。 */
+  inset: 6px 0 6px 8px;
   /* 拖分隔条时终端要等突发结束才 fit，这期间旧的宽会超出宿主，别让它画到文件面板上 */
   overflow: hidden;
 }
