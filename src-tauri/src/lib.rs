@@ -1,10 +1,12 @@
 mod files;
+mod import;
+pub mod mcp;
 mod sessions;
 pub mod stats;
 pub mod terminal;
 
-use sessions::{CommandTree, SessionTree};
-use tauri::State;
+use sessions::{CommandTree, Node, SessionTree};
+use tauri::{Manager, State};
 
 #[tauri::command]
 fn load_sessions() -> Result<SessionTree, String> {
@@ -26,13 +28,58 @@ fn save_commands(tree: CommandTree) -> Result<(), String> {
     sessions::save_commands(&tree)
 }
 
+/// 弹出文件对话框选择 SecureCRT 导出的 XML，解析出会话节点返回给前端。
+/// 用户取消选择时返回 None（前端据此不做任何改动）。
+#[tauri::command]
+fn import_securecrt() -> Result<Option<Vec<Node>>, String> {
+    let Some(path) = rfd::FileDialog::new()
+        .add_filter("SecureCRT 配置", &["xml"])
+        .pick_file()
+    else {
+        return Ok(None);
+    };
+    let text = std::fs::read_to_string(&path).map_err(|e| format!("读取文件失败: {e}"))?;
+    import::parse_securecrt(&text).map(Some)
+}
+
+/// 同上，选 WinSCP 的配置存储（WinSCP.ini）。
+#[tauri::command]
+fn import_winscp() -> Result<Option<Vec<Node>>, String> {
+    let Some(path) = rfd::FileDialog::new()
+        .add_filter("WinSCP 配置", &["ini"])
+        .pick_file()
+    else {
+        return Ok(None);
+    };
+    let text = std::fs::read_to_string(&path).map_err(|e| format!("读取文件失败: {e}"))?;
+    import::parse_winscp(&text).map(Some)
+}
+
+/// 关于页要显示的运行环境与数据目录。目录只拼路径不创建——打开弹窗不该有副作用
+/// （sessions::store_path() 会 create_dir_all，这里不能复用）。
+#[derive(serde::Serialize)]
+#[serde(rename_all = "camelCase")]
+struct AppInfo {
+    os: &'static str,
+    arch: &'static str,
+    data_dir: String,
+}
+
+#[tauri::command]
+fn app_info() -> AppInfo {
+    let data_dir = dirs::config_dir()
+        .map(|p| p.join("shellx").display().to_string())
+        .unwrap_or_default();
+    AppInfo { os: std::env::consts::OS, arch: std::env::consts::ARCH, data_dir }
+}
+
 #[tauri::command]
 async fn terminal_open(
     state: State<'_, terminal::Shared>,
     args: terminal::OpenArgs,
     on_event: tauri::ipc::Channel<terminal::OutEvent>,
 ) -> Result<(), String> {
-    terminal::open(&state, args, on_event).await
+    terminal::open(&state, args, terminal::channel_sink(on_event)).await
 }
 
 #[tauri::command]
@@ -134,6 +181,29 @@ async fn stats_stop(state: State<'_, stats::Shared>, id: String) -> Result<(), S
 }
 
 #[tauri::command]
+async fn mcp_status(state: State<'_, mcp::Shared>) -> Result<mcp::Status, String> {
+    Ok(mcp::status(&state).await)
+}
+
+#[tauri::command]
+async fn mcp_set_enabled(
+    state: State<'_, mcp::Shared>,
+    enabled: bool,
+) -> Result<mcp::Status, String> {
+    mcp::set_enabled(&state, enabled).await
+}
+
+#[tauri::command]
+async fn mcp_set_port(state: State<'_, mcp::Shared>, port: u16) -> Result<mcp::Status, String> {
+    mcp::set_port(&state, port).await
+}
+
+#[tauri::command]
+async fn mcp_rotate_token(state: State<'_, mcp::Shared>) -> Result<mcp::Status, String> {
+    mcp::rotate_token(&state).await
+}
+
+#[tauri::command]
 fn local_home() -> String {
     files::local_home()
 }
@@ -191,19 +261,30 @@ fn pick_key_file() -> Option<String> {
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
+    let term = terminal::new_manager();
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
         // 应用内更新：装完新包要 relaunch 才生效（Linux 的 AppImage 尤其靠这一步）
         .plugin(tauri_plugin_updater::Builder::new().build())
         .plugin(tauri_plugin_process::init())
-        .manage(terminal::new_manager())
+        .manage(term.clone())
         .manage(files::new_manager())
         .manage(stats::new_manager())
+        .manage(mcp::new_manager(term))
+        .setup(|app| {
+            // 上次开着 MCP 服务就按原端口/token 拉起来，agent 侧的接入配置不用改
+            let state = app.state::<mcp::Shared>().inner().clone();
+            tauri::async_runtime::spawn(async move { mcp::boot(&state).await });
+            Ok(())
+        })
         .invoke_handler(tauri::generate_handler![
             load_sessions,
             save_sessions,
             load_commands,
             save_commands,
+            import_securecrt,
+            import_winscp,
+            app_info,
             terminal_open,
             terminal_send,
             terminal_resize,
@@ -218,6 +299,10 @@ pub fn run() {
             sftp_upload,
             stats_start,
             stats_stop,
+            mcp_status,
+            mcp_set_enabled,
+            mcp_set_port,
+            mcp_rotate_token,
             local_home,
             local_shortcuts,
             clipboard_read,

@@ -10,6 +10,19 @@ use tokio::sync::{mpsc, oneshot, Mutex};
 
 const BUF_SIZE: usize = 32768;
 
+/// 空闲多久发一次保活包。内网的防火墙/NAT 会掐掉长时间无包的 TCP，
+/// sshd 的 ClientAliveInterval 也是从「上次收到任何包」开始计时的，30 秒足以压住两边。
+pub const KEEPALIVE_SECS: u64 = 30;
+
+/// 三条 SSH 通道（终端 / 文件面板 / 性能面板）共用的连接配置。
+/// keepalive_max 沿用 russh 默认 3：连续 3 次无回应即判定链路已死，主动断开。
+pub fn client_config(idle_secs: u64) -> Arc<client::Config> {
+    Arc::new(client::Config {
+        keepalive_interval: (idle_secs > 0).then(|| std::time::Duration::from_secs(idle_secs)),
+        ..Default::default()
+    })
+}
+
 #[derive(Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct OpenArgs {
@@ -26,6 +39,9 @@ pub struct OpenArgs {
     pub methods: Vec<String>,
     pub cols: u16,
     pub rows: u16,
+    /// 空闲保活秒数，0 表示关闭；省略时用 KEEPALIVE_SECS
+    #[serde(default)]
+    pub keepalive_secs: Option<u64>,
 }
 
 #[derive(Clone, Copy)]
@@ -43,10 +59,27 @@ pub enum OutEvent {
     Closed { reason: String },
 }
 
-type Sink = tauri::ipc::Channel<OutEvent>;
+/// 输出往哪儿送：界面标签页走 Tauri IPC 通道，MCP 的无头会话落到自己的环形缓冲。
+pub trait OutSink: Send + Sync + 'static {
+    fn emit(&self, event: OutEvent);
+}
 
-fn emit(sink: &Sink, event: OutEvent) {
-    let _ = sink.send(event);
+impl<F> OutSink for F
+where
+    F: Fn(OutEvent) + Send + Sync + 'static,
+{
+    fn emit(&self, event: OutEvent) {
+        self(event)
+    }
+}
+
+pub type Sink = Arc<dyn OutSink>;
+
+/// 把前端传来的 IPC 通道包装成 Sink
+pub fn channel_sink(channel: tauri::ipc::Channel<OutEvent>) -> Sink {
+    Arc::new(move |event| {
+        let _ = channel.send(event);
+    })
 }
 
 pub(crate) fn format_err(e: anyhow::Error) -> String {
@@ -174,7 +207,8 @@ async fn session_logic(
     let result: Result<()> = async {
         let key = load_key(&args.key_path);
         let addr = format!("{}:{}", args.host, args.port);
-        let mut handle = client::connect(Arc::new(client::Config::default()), addr.as_str(), ShellHandler)
+        let idle = args.keepalive_secs.unwrap_or(KEEPALIVE_SECS);
+        let mut handle = client::connect(client_config(idle), addr.as_str(), ShellHandler)
             .await
             .with_context(|| format!("无法连接到 {addr}"))?;
         authenticate(&mut handle, &args.username, &args.password, key, &args.methods).await?;
@@ -213,19 +247,16 @@ async fn session_logic(
         });
 
         let _ = ready.take().map(|tx| tx.send(Ok(())));
-        emit(&sink, OutEvent::Ready);
+        sink.emit(OutEvent::Ready);
 
         let mut reader = r.make_reader();
         let mut buf = vec![0u8; BUF_SIZE];
         loop {
             match reader.read(&mut buf).await {
                 Ok(0) | Err(_) => break,
-                Ok(n) => emit(
-                    &sink,
-                    OutEvent::Output {
-                        data: String::from_utf8_lossy(&buf[..n]).into_owned(),
-                    },
-                ),
+                Ok(n) => sink.emit(OutEvent::Output {
+                    data: String::from_utf8_lossy(&buf[..n]).into_owned(),
+                }),
             }
         }
         writer.abort();
@@ -248,7 +279,7 @@ async fn session_logic(
             msg
         }
     };
-    emit(&sink, OutEvent::Closed { reason });
+    sink.emit(OutEvent::Closed { reason });
 }
 
 struct Terminal {

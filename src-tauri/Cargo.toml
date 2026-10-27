@@ -1,6 +1,6 @@
 [package]
 name = "shellx"
-version = "0.1.0"
+version = "0.2.0"
 description = "ShellX - a cross-platform SSH2 terminal client"
 authors = ["you"]
 edition = "2021"
@@ -30,8 +30,25 @@ dirs = "6"
 russh-sftp = "3.0.1"
 arboard = "3.6"
 rfd = "0.15"
+roxmltree = "0.20"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
+
+# MCP 服务：把已存会话开成 Streamable HTTP 的 MCP server，只监听回环。
+# rmcp 默认带 server + macros；服务端传输要自己开。
+rmcp = { version = "3.7", features = ["transport-streamable-http-server"] }
+axum = "0.8"
+tokio-util = "0.7"
+getrandom = "0.3"
+
+[dev-dependencies]
+# MCP 协议层测试用 rmcp 自带的客户端真跑一次握手，不手写 JSON-RPC
+rmcp = { version = "3.7", features = ["client", "transport-streamable-http-client-reqwest"] }
+reqwest = { version = "0.13", default-features = false }
+# 上游（tauri-plugin-updater）把 reqwest 的 rustls 编成了 no-provider 档，
+# reqwest::Client::new() 会因为没有默认加密 provider 直接 panic；测试里显式装一个 ring 的。
+# 只用 ring：aws-lc-rs 在 Windows 上要 NASM。
+rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
 
 # DPAPI 只在 Windows 上有；不门控的话 Linux/macOS 构建会去编译 windows → windows-future，
 # 后者在非 Windows 目标上过不了编译（CI 首轮就是这里红的）。

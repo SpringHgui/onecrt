@@ -57,6 +57,8 @@ import SessionTree from "./SessionTree";
 import QuickConnect, { ConnectParams } from "./QuickConnect";
 import PasswordPrompt from "./PasswordPrompt";
 import ConfirmDialog from "./ConfirmDialog";
+import ImportDialog from "./ImportDialog";
+import McpDialog from "./McpDialog";
 import CommandManager from "./CommandManager";
 import FilePanel from "./FilePanel";
 import PerfPanel from "./PerfPanel";
@@ -419,6 +421,8 @@ export default function App() {
   const [quickConnect, setQuickConnect] = useState<null | { edit?: SshSession; prefill?: Partial<ConnectParams> }>(null);
   const [pwdPrompt, setPwdPrompt] = useState<{ session: SshSession; reconnectTabId?: string } | null>(null);
   const [confirmBox, setConfirmBox] = useState<{ message: string; action: () => void } | null>(null);
+  const [importBox, setImportBox] = useState(false);
+  const [mcpBox, setMcpBox] = useState(false);
   const [cmdTree, setCmdTree] = useState<CommandNode[]>([]);
   const [cmdExpanded, setCmdExpanded] = useState<Set<string>>(new Set());
   const [cmdSelectedId, setCmdSelectedId] = useState<string | null>(null);
@@ -682,6 +686,42 @@ export default function App() {
   };
 
   const addFolder = () => startNewFolder("sessions");
+
+  /// 文件 → 导入外部客户端配置：后端弹框选文件并解析，前端补 id 后追加到当前树
+  const importSessions = async (cmd: "import_securecrt" | "import_winscp") => {
+    let imported: Node[] | null;
+    try {
+      imported = await invoke<Node[] | null>(cmd);
+    } catch (e) {
+      setConfirmBox({ message: t("sm.importError", { err: String(e) }), action: () => {} });
+      return;
+    }
+    if (!imported) return; // 用户取消选择
+
+    // 后端把 id 留空，这里统一分配，避免与现有会话/文件夹撞号
+    const assign = (nodes: Node[]): Node[] =>
+      nodes.map((n) =>
+        isFolder(n)
+          ? { ...n, id: newId("f"), children: assign(n.children) }
+          : { ...n, id: newId("s") },
+      );
+    const count = (nodes: Node[]): number =>
+      nodes.reduce((acc, n) => acc + (isFolder(n) ? count(n.children) : 1), 0);
+
+    const withIds = assign(imported);
+    const n = count(withIds);
+    if (n === 0) {
+      setConfirmBox({ message: t("sm.importNone"), action: () => {} });
+      return;
+    }
+    persistTree([...treeRef.current, ...withIds]);
+    setExpanded((s) => {
+      const next = new Set(s);
+      collectFolderIds(withIds, next);
+      return next;
+    });
+    setConfirmBox({ message: t("sm.imported", { n }), action: () => {} });
+  };
 
   const deleteNode = (node: Node) => {
     setConfirmBox({
@@ -1893,6 +1933,8 @@ export default function App() {
     toggleTheme: () => setTheme((t) => (t === "dark" ? "light" : "dark")),
     newSession: () => setQuickConnect({ edit: undefined }),
     newFolder: addFolder,
+    importConfig: () => setImportBox(true),
+    mcp: () => setMcpBox(true),
     closeTab: () => activeTab && closeTab(activeTab),
     quit: () =>
       getCurrentWindow()
@@ -2005,6 +2047,18 @@ export default function App() {
         />
       )}
 
+      {importBox && (
+        <ImportDialog
+          onCancel={() => setImportBox(false)}
+          onPick={(src) => {
+            setImportBox(false);
+            void importSessions(src.cmd);
+          }}
+        />
+      )}
+
+      {mcpBox && <McpDialog onClose={() => setMcpBox(false)} />}
+
       {confirmBox && (
         <ConfirmDialog
           message={confirmBox.message}
@@ -2032,7 +2086,7 @@ export default function App() {
         />
       )}
 
-      {view.statusBar && <StatusBar info={statusInfo} tabCount={tabs.length} fontSize={fontSize} />}
+      {view.statusBar && <StatusBar info={statusInfo} tabCount={tabs.length} fontSize={fontSize} onOpenMcp={() => setMcpBox(true)} />}
       {about && <AboutDialog onClose={() => setAbout(false)} />}
     </div>
   );

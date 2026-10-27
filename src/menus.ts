@@ -19,6 +19,10 @@ export interface MenuCtx {
   toggleTheme(): void;
   newSession(): void;
   newFolder(): void;
+  /// 打开"导入配置"弹窗，来源（SecureCRT / WinSCP）在弹窗里选
+  importConfig(): void;
+  /// 打开"MCP 服务"设置弹窗
+  mcp(): void;
   closeTab(): void;
   quit(): void;
   reconnect(): void;
@@ -51,6 +55,9 @@ export function buildMenus(c: MenuCtx): MenuDef[] {
       items: [
         { label: t("menu.file.newSession"), onClick: c.newSession },
         { label: t("menu.file.newFolder"), onClick: c.newFolder },
+        {},
+        { label: t("menu.file.import"), onClick: c.importConfig },
+        { label: t("menu.file.mcp"), onClick: c.mcp },
         {},
         { label: t("menu.file.closeTab"), accel: "Ctrl+W", disabled: !c.hasTab, onClick: c.closeTab },
         {},

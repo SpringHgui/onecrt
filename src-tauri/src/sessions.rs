@@ -9,7 +9,7 @@ pub struct AuthMethod {
     pub enabled: bool,
 }
 
-fn default_auth() -> Vec<AuthMethod> {
+pub(crate) fn default_auth() -> Vec<AuthMethod> {
     ["PublicKey", "Password", "Keyboard Interactive"]
         .into_iter()
         .map(|method| AuthMethod {

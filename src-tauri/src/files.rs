@@ -114,7 +114,7 @@ pub async fn open(mgr: &Shared, args: OpenArgs) -> Result<String, String> {
     let addr = format!("{}:{}", args.host, args.port);
     let key = terminal::load_key(&args.key_path);
     let mut handle = client::connect(
-        Arc::new(client::Config::default()),
+        terminal::client_config(terminal::KEEPALIVE_SECS),
         addr.as_str(),
         terminal::ShellHandler,
     )

@@ -72,7 +72,7 @@ async fn monitor_logic(args: StartArgs, sink: Sink, ready: oneshot::Sender<Resul
         let key = terminal::load_key(&args.key_path);
         let addr = format!("{}:{}", args.host, args.port);
         let mut handle = client::connect(
-            Arc::new(client::Config::default()),
+            terminal::client_config(terminal::KEEPALIVE_SECS),
             addr.as_str(),
             terminal::ShellHandler,
         )

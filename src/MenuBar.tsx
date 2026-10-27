@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
-import { IconX } from "@tabler/icons-react";
+import { IconExternalLink, IconX } from "@tabler/icons-react";
 import { getVersion } from "@tauri-apps/api/app";
+import { invoke } from "@tauri-apps/api/core";
+import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import { check } from "@tauri-apps/plugin-updater";
 import { relaunch } from "@tauri-apps/plugin-process";
 import { ink } from "./icons";
@@ -133,16 +135,80 @@ export function useMenuShortcuts(h: ShortcutHandlers) {
   }, []);
 }
 
+/// 仓库地址：本地目录叫 shellx，远端是 onecrt，关于页的链接一律按远端写
+const REPO = "https://github.com/SpringHgui/onecrt";
+
+/// 关于页的外链。openUrl 由 opener 插件按默认浏览器打开，http/https 已在 opener:default 作用域里
+const ABOUT_LINKS = [
+  { key: "about.link.home", url: REPO },
+  { key: "about.link.releases", url: `${REPO}/releases` },
+  { key: "about.link.issues", url: `${REPO}/issues/new` },
+  { key: "about.link.notice", url: `${REPO}/blob/master/NOTICE.md` },
+];
+
+/// 直接依赖，地址取自各自 package.json 的 homepage / repository
+const ABOUT_CREDITS = [
+  { name: "Tauri 2", url: "https://tauri.app" },
+  { name: "russh", url: "https://github.com/warp-tech/russh" },
+  { name: "xterm.js", url: "https://github.com/xtermjs/xterm.js" },
+  { name: "FlexLayout", url: "https://github.com/caplin/FlexLayout" },
+  { name: "Tabler Icons", url: "https://tabler.io/icons" },
+];
+
+const OS_LABEL: Record<string, string> = { windows: "Windows", macos: "macOS", linux: "Linux" };
+const ARCH_LABEL: Record<string, string> = { x86_64: "x64", aarch64: "ARM64" };
+
+interface AppInfo {
+  os: string;
+  arch: string;
+  dataDir: string;
+}
+
 export function AboutDialog({ onClose }: { onClose(): void }) {
   const { t } = useI18n();
   /// 版本取运行时注入的值（唯一数据源是 tauri.conf.json），别再在代码里抄一份常量
   const [version, setVersion] = useState("");
+  const [info, setInfo] = useState<AppInfo | null>(null);
+  const [copied, setCopied] = useState(false);
   const [upd, setUpd] = useState<"idle" | "checking" | "installing" | "latest" | "error">("idle");
   const [pending, setPending] = useState("");
 
   useEffect(() => {
     getVersion().then(setVersion, () => setVersion(""));
+    invoke<AppInfo>("app_info").then(setInfo, () => setInfo(null));
   }, []);
+
+  const envLine = info
+    ? [OS_LABEL[info.os] ?? info.os, ARCH_LABEL[info.arch] ?? info.arch].filter(Boolean).join(" · ")
+    : "";
+
+  /// 提 issue 时把环境一次贴走，省得来回问「你什么系统、哪个版本」
+  const copyInfo = () => {
+    const text = [
+      `ShellX ${version}`,
+      envLine,
+      info?.dataDir ? `${t("about.dataDir")}: ${info.dataDir}` : "",
+    ]
+      .filter(Boolean)
+      .join("\n");
+    invoke("clipboard_write", { text }).then(
+      () => {
+        setCopied(true);
+        setTimeout(() => setCopied(false), 1600);
+      },
+      (e) => console.error("copy", e)
+    );
+  };
+
+  /// revealItemInDir 而不是 openPath：后者不在 opener:default 作用域内，前者无路径限制
+  const openDataDir = () => {
+    if (!info?.dataDir) return;
+    revealItemInDir(info.dataDir).catch((e) => console.error("openDir", e));
+  };
+
+  const openLink = (url: string) => {
+    openUrl(url).catch((e) => console.error("openUrl", e));
+  };
 
   const checkUpdate = async () => {
     setUpd("checking");
@@ -165,29 +231,67 @@ export function AboutDialog({ onClose }: { onClose(): void }) {
 
   return (
     <div className="dialog-overlay" onMouseDown={(e) => e.target === e.currentTarget && onClose()}>
-      <div className="dialog dialog-sm">
+      <div className="dialog dialog-about">
         <div className="dialog-titlebar">
           <span>{t("about.title")}</span>
           <button className="dialog-close" onClick={onClose}>
             <IconX {...ink(16)} />
           </button>
         </div>
-        <div className="dialog-body">
-          <div className="about-line">
-            <b>ShellX</b> {version}
-          </div>
-          <div className="hint">{t("about.desc")}</div>
-          <div className="hint">{t("about.note")}</div>
-          {upd !== "idle" && (
-            <div className="hint">
-              {upd === "checking" && t("about.checking")}
-              {upd === "latest" && t("about.latest")}
-              {upd === "installing" && t("about.installing", { ver: pending })}
-              {upd === "error" && t("about.error")}
+        <div className="dialog-body about-body">
+          <div className="about-cols">
+            <div className="about-brand">
+              <img className="about-logo" src="/app-icon.svg" alt="ShellX" width={64} height={64} />
+              <div className="about-name">ShellX</div>
+              <div className="about-ver">{version || "—"}</div>
+              <div className="about-env">{envLine || "—"}</div>
+              <div className="about-desc">{t("about.desc")}</div>
             </div>
-          )}
+            <div className="about-detail">
+              <div className="about-links">
+                {ABOUT_LINKS.map((l) => (
+                  <button key={l.key} className="about-link" onClick={() => openLink(l.url)}>
+                    <span>{t(l.key)}</span>
+                    <IconExternalLink {...ink(14)} />
+                  </button>
+                ))}
+              </div>
+              <div className="about-dir">
+                <span className="about-dir-label">{t("about.dataDir")}</span>
+                <button className="btn btn-narrow" disabled={!info?.dataDir} onClick={openDataDir}>
+                  {t("about.open")}
+                </button>
+              </div>
+              <div className="about-path" title={info?.dataDir}>
+                {info?.dataDir || "—"}
+              </div>
+              <div className="about-note">{t("about.note")}</div>
+              {upd !== "idle" && (
+                <div className="about-status">
+                  {upd === "checking" && t("about.checking")}
+                  {upd === "latest" && t("about.latest")}
+                  {upd === "installing" && t("about.installing", { ver: pending })}
+                  {upd === "error" && t("about.error")}
+                </div>
+              )}
+            </div>
+          </div>
+          <div className="about-credits">
+            <span>{t("about.builtWith")}</span>
+            {ABOUT_CREDITS.map((c, i) => (
+              <span key={c.url} className="about-credit-group">
+                {i > 0 && <span className="about-dot">·</span>}
+                <button className="about-credit" onClick={() => openLink(c.url)}>
+                  {c.name}
+                </button>
+              </span>
+            ))}
+          </div>
         </div>
         <div className="dialog-footer">
+          <button className="btn" onClick={copyInfo} disabled={!version}>
+            {copied ? t("about.copied") : t("about.copyInfo")}
+          </button>
           <button className="btn" disabled={upd === "checking" || upd === "installing"} onClick={checkUpdate}>
             {t("about.checkUpdate")}
           </button>

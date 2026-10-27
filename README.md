@@ -5,13 +5,16 @@
 ## 功能
 
 - **Session Manager**：文件夹 + 会话树，支持过滤、新建文件夹、删除、双击连接，树结构持久化为 JSON。
+- **导入外部配置**：文件 → 导入配置… 打开来源弹窗（SecureCRT、WinSCP，各带官方标识），选中来源后在系统文件框里挑它的配置文件（SecureCRT 导出的会话 XML / WinSCP 的 WinSCP.ini），解析出的会话连同分组层级追加到当前会话树。两种配置都不含可用的明文口令，导入的会话在连接时补凭据。第三方标识的来源与权利人见 NOTICE.md。
 - **会话树右键菜单**：Connect Terminal、Cut / Copy / Paste（树节点级，粘贴到右键目标所在文件夹）、Find、Delete、Rename、Expand / Collapse All Folders、Properties。
 - **Quick Connect**：Protocol / Hostname / Port / Username / 认证方式（PublicKey、Keyboard Interactive、Password、GSSAPI），认证属性（口令、私钥路径）默认展开，可保存为会话节点。
 - **终端标签页**：xterm.js 渲染，真实 SSH PTY，支持自适应尺寸、粘贴、多会话并行，标签上显示连接状态。
 - **标签页右键菜单**：Rename / Reset Name、Reconnect / Disconnect、Close (Ctrl+F4) / Close Disconnected Tabs / Close Other Tabs / Close Tabs to the Right / Close All Tabs、Clone Session、Session Options...。Rename 只改标签显示名，Reset Name 回到会话名；改会话本身用 Session Options。Clone Session 用同一份连接参数另开一个标签页，快速连接型标签（无对应会话节点）的 Session Options 置灰。
 - **Command Manager**：与 Session Manager 共用左侧停靠区，底部两个标签切换。同样是文件夹 + 命令树，支持过滤、新建命令 / 新建文件夹、剪切 / 复制 / 粘贴、删除、重命名、展开 / 折叠全部、属性；双击命令或点工具栏箭头发送到当前终端；右键 "Send Command to" 按作用域发送：All Sessions 广播给所有就绪标签页，Visible Sessions 只发给当前可见的那个。命令的显示名与实际发送文本分开存储，允许多行。
 - **工具栏**：菜单栏下方一行，依次为：新建连接（用活动标签的连接参数打开 Quick Connect，没有活动标签时是空白新建）、切换下一个标签、重新连接 | 复制、粘贴、打印 | 会话选项、键盘映射、端口转发。有活动标签时才可用；打印 / 键盘映射 / 端口转发为置灰占位。视图菜单的"工具栏"控制这一行。
+- **关于对话框**：帮助 → 关于 ShellX… 给出版本、运行平台与数据目录（「打开」直接在文件管理器里定位该目录），四个外链（项目主页 / Releases 与下载 / 提交 issue / 第三方标识声明 NOTICE）与依赖致谢；「复制版本信息」一次拷走版本、平台、数据目录，提 issue 时直接粘。外链与打开目录都交回系统默认应用（`tauri-plugin-opener`）。
 - **认证**：密码、公钥（OpenSSH 私钥，支持 `~` 展开）、键盘交互；失败时回传具体原因。
+- **MCP 服务**：文件 → MCP 服务… 打开设置弹窗，勾选后在 `127.0.0.1:39117/mcp`（端口可改）起一个 Streamable HTTP 的 MCP server，把已存会话作为工具开放给外部智能体（Qoder / Claude Desktop / Cursor），弹窗里的复制按钮给出可直接粘进客户端的 `{ mcpServers: { shellx: … } }` JSON。工具六个：`sessions_list`、`terminals_list`、`exec`、`send`、`read`、`close`。`exec` 按会话复用同一个 shell，`cd`、`export` 跨调用有效；命令是否跑完由追加的 `echo` 结束标记判定，回传正文带退出码，输出单次上限 64 KB，超出部分给出续读偏移。默认关闭、只监听回环、每个请求校验 `Authorization: Bearer <token>`；智能体只能点用 shellx 已存的凭据，既收不到也看不到口令本身。弹窗两秒刷新一次，列出当前在跑的 agent 会话与它们最后一条命令。
 
 ## 开发
 
@@ -57,9 +60,11 @@ cd src-tauri && cargo test
 
 `tests/ssh_e2e.rs` 在同进程内起一个 russh 服务端，走真实的连接 → 认证 → PTY/shell → 输入输出 → 调整窗口大小 → 关闭链路，并覆盖密码错误与主机不可达两条失败路径。
 
+`tests/mcp_http.rs` 用 rmcp 自带的客户端向本机临时端口连一次真实握手（配置写在 `%TEMP%` 的临时 `mcp.json` 里，端口填 0 由内核挑，不碰 `%APPDATA%`）：不带正确令牌时握手中途被 401 拦掉，带令牌时列全六个工具并成功调用一个无副作用的 `terminals_list`（单线程与多线程 runtime 各跑一遍）。另两条守启动状态机：重新生成令牌后仍要在同一端口监听、旧令牌立刻 401；按原端口重绑不能撞 `os error 10048`（监听任务没真退出就重绑）。`src/mcp.rs` 里的单元测试锁 agent 输出缓冲的偏移语义：`read_from` 只回 from 之后的增量、只有 from 落在被挤掉的前缀里才报丢弃。
+
 ## 数据位置
 
-会话与命令保存在 `dirs::config_dir()/shellx/`（Windows：`%APPDATA%\shellx\`）下的 `sessions.json`、`commands.json`。口令在 Windows 上经 DPAPI 加密后落盘（存成 `dpapi:` 前缀的十六进制，密钥由当前登录用户持有），私钥路径明文；Linux 与 macOS 没有可移植的系统级密钥，口令明文存放。仅面向内网运维场景，请勿用于对外分发的机器。
+会话与命令保存在 `dirs::config_dir()/shellx/`（Windows：`%APPDATA%\shellx\`）下的 `sessions.json`、`commands.json`。MCP 服务的开关、端口与令牌在同目录的 `mcp.json`，令牌明文存放；改端口会重启监听，重新生成令牌不会（鉴权逐请求现读，客户端下次请求就用新值，旧令牌当场失效）。口令在 Windows 上经 DPAPI 加密后落盘（存成 `dpapi:` 前缀的十六进制，密钥由当前登录用户持有），私钥路径明文；Linux 与 macOS 没有可移植的系统级密钥，口令明文存放。仅面向内网运维场景，请勿用于对外分发的机器。
 
 ## 已知取舍
 
@@ -70,4 +75,5 @@ cd src-tauri && cargo test
 - 菜单右侧的快捷键（Ctrl+Alt+T 等）当前只作对照显示，未绑定全局按键；菜单内可用 ↑ ↓ Enter Esc 操作，→ 打开子菜单、← 关闭。
 - 标签页右键菜单同样列全条目，其中 Close Tab Group / Lock Session... / Clone in New Window / Send to New Window / Send to New Tab Group / Connect SFTP Session / Open SecureFX / Save Session... / Send Commands to This Group 为置灰占位：它们分别依赖标签组、多窗口与 SFTP，这三样都还没实现。
 - 命令树面板没有还原标题栏右侧的置顶 / 关闭两个小图标，停靠区改由底部的 Session Manager / Command Manager 标签切换。
+- MCP 服务只覆盖 SSH 终端这一层：没有把 SFTP 文件读写做成工具，agent 用无头会话（`mcp-` 前缀的 terminal id）连进去，这些会话不进 flexlayout 布局、不出现在标签页里，也就看不到用户自己开着的标签；关闭 MCP 开关会连带拆掉 agent 遗留的 shell。服务默认关闭，`mcp.json` 里 `enabled: true` 才会在启动时拉起；端口被占用时开关会自动落回关闭并在弹窗里显示失败原因。
 - 主题只覆盖界面配色：`tauri.conf.json` 里窗口的 `theme: "Dark"` 是写死的，明亮主题下启动瞬间标题栏仍偏暗，要等前端 `setTheme` 生效才纠正（`backgroundColor` 已与深色 `--bg` 对齐为 `#222426`，深色主题不再有底色跳变）。终端 ANSI 只接了红/黄/绿三档（`--ansi-*`，报错与断连提示走的就是这三档），其余 13 色仍用 xterm 默认调色板。

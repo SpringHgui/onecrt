@@ -2,10 +2,12 @@
 use russh::keys::PrivateKey;
 use russh::server::{Msg, Session as ServerSession};
 use russh::{ChannelId, Pty};
-use shellx_lib::terminal::{self, OpenArgs, OutEvent, Shared};
+use shellx_lib::terminal::{self, OpenArgs, Shared};
 use shellx_lib::stats;
+use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use tauri::ipc::{Channel, InvokeResponseBody};
+use tokio::io::{AsyncRead, AsyncWrite};
 use tokio::net::TcpListener;
 
 #[derive(Default)]
@@ -15,6 +17,8 @@ struct Obs {
     winsizes: Vec<(u32, u32)>,
     /// 性能面板那条通道收到的命令行
     exec: Option<String>,
+    /// 客户端 → 服务端的累计字节数（含握手），空闲保活测试用
+    client_bytes: usize,
 }
 
 #[derive(Clone)]
@@ -132,6 +136,46 @@ impl russh::server::Handler for Srv {
 /// 仅测试用的临时主机密钥（tests/fixtures/test_host_key），不对应任何真实凭据
 const TEST_HOST_KEY_PATH: &str = concat!(env!("CARGO_MANIFEST_DIR"), "/tests/fixtures/test_host_key");
 
+/// 给 TCP 流计个数：服务端读到的字节就是客户端发出来的，空闲期只能靠保活增长。
+struct CountingIn<S> {
+    inner: S,
+    obs: Arc<Mutex<Obs>>,
+}
+
+impl<S: AsyncRead + Unpin> AsyncRead for CountingIn<S> {
+    fn poll_read(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &mut tokio::io::ReadBuf<'_>,
+    ) -> std::task::Poll<std::io::Result<()>> {
+        let me = self.get_mut();
+        let before = buf.filled().len();
+        let poll = Pin::new(&mut me.inner).poll_read(cx, buf);
+        if matches!(poll, std::task::Poll::Ready(Ok(()))) {
+            me.obs.lock().unwrap().client_bytes += buf.filled().len() - before;
+        }
+        poll
+    }
+}
+
+impl<S: AsyncWrite + Unpin> AsyncWrite for CountingIn<S> {
+    fn poll_write(
+        self: Pin<&mut Self>,
+        cx: &mut std::task::Context<'_>,
+        buf: &[u8],
+    ) -> std::task::Poll<std::io::Result<usize>> {
+        Pin::new(&mut self.get_mut().inner).poll_write(cx, buf)
+    }
+
+    fn poll_flush(self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<std::io::Result<()>> {
+        Pin::new(&mut self.get_mut().inner).poll_flush(cx)
+    }
+
+    fn poll_shutdown(self: Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<std::io::Result<()>> {
+        Pin::new(&mut self.get_mut().inner).poll_shutdown(cx)
+    }
+}
+
 async fn start_server() -> (u16, Arc<Mutex<Obs>>, tokio::task::JoinHandle<()>) {
     let obs = Arc::new(Mutex::new(Obs::default()));
     let srv = Srv {
@@ -145,11 +189,16 @@ async fn start_server() -> (u16, Arc<Mutex<Obs>>, tokio::task::JoinHandle<()>) {
     });
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
+    let counting_obs = obs.clone();
     let task = tokio::spawn(async move {
         loop {
             let Ok((stream, _)) = listener.accept().await else { break };
             let config = config.clone();
             let handler = srv.clone();
+            let stream = CountingIn {
+                inner: stream,
+                obs: counting_obs.clone(),
+            };
             tokio::spawn(async move {
                 let _ = russh::server::run_stream(config, stream, handler).await;
             });
@@ -169,16 +218,17 @@ fn args_for(port: u16, password: &str) -> OpenArgs {
         methods: vec![],
         cols: 100,
         rows: 30,
+        keepalive_secs: None,
     }
 }
 
-fn recording_channel(log: Arc<Mutex<Vec<String>>>) -> Channel<OutEvent> {
-    Channel::new(move |body| {
+fn recording_channel(log: Arc<Mutex<Vec<String>>>) -> terminal::Sink {
+    terminal::channel_sink(Channel::new(move |body| {
         if let InvokeResponseBody::Json(json) = body {
             log.lock().unwrap().push(json);
         }
         Ok(())
-    })
+    }))
 }
 
 async fn wait_for(log: &Arc<Mutex<Vec<String>>>, needle: &str, secs: u64) -> bool {
@@ -255,6 +305,48 @@ async fn unreachable_host_reports_error() {
         .expect_err("连不上时应报错");
     assert!(err.contains("无法连接"), "错误信息应说明连接失败，实际: {err}");
     assert!(log.lock().unwrap().is_empty(), "失败路径不应产生事件: {:?}", log.lock().unwrap());
+}
+
+/// 空闲保活：用户不敲键盘时，客户端必须继续往服务端发包，否则防火墙/sshd 的空闲超时会掐线。
+#[tokio::test]
+async fn idle_client_sends_keepalives() {
+    let (port, obs, _server) = start_server().await;
+    let m = terminal::new_manager();
+    let log = Arc::new(Mutex::new(Vec::new()));
+    let mut a = args_for(port, "secret");
+    a.keepalive_secs = Some(1);
+
+    terminal::open(&m, a, recording_channel(log.clone()))
+        .await
+        .expect("open 应当成功");
+    wait_until(&obs, |o| o.shell, 5).await;
+    // 握手与开壳的包先落定，此后的入站字节只可能来自保活
+    tokio::time::sleep(std::time::Duration::from_millis(500)).await;
+    let base = obs.lock().unwrap().client_bytes;
+    wait_until(&obs, |o| o.client_bytes > base, 4).await;
+    let after = obs.lock().unwrap().client_bytes;
+
+    terminal::close(m.clone(), "t1".into()).await;
+    assert!(
+        after > base,
+        "空闲 4 秒内客户端一个字节都没发（基线 {base}），保活没生效"
+    );
+}
+
+/// 前端 payload 不带 keepaliveSecs，必须落到默认值而不是把保活关掉
+#[test]
+fn omitted_keepalive_falls_back_to_the_default_interval() {
+    let args = serde_json::json!({
+        "id": "t1", "host": "10.0.0.1", "port": 22, "username": "root",
+        "password": "", "keyPath": "", "methods": [], "cols": 80, "rows": 24,
+    });
+    let a: OpenArgs = serde_json::from_value(args).expect("前端旧 payload 应能解析");
+    assert_eq!(a.keepalive_secs, None);
+    let cfg = terminal::client_config(a.keepalive_secs.unwrap_or(terminal::KEEPALIVE_SECS));
+    assert_eq!(
+        cfg.keepalive_interval,
+        Some(std::time::Duration::from_secs(terminal::KEEPALIVE_SECS))
+    );
 }
 
 // ---------- 性能面板的采样通道 ----------

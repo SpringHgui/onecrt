@@ -430,6 +430,57 @@ body {
   line-height: 1.5;
 }
 
+/* 导入配置弹窗：一行一个来源，官方标识等比进 40x40 统一瓦片 */
+.import-srcs {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding-bottom: 16px;
+}
+
+.import-src {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  width: 100%;
+  padding: 10px 12px;
+  text-align: left;
+  color: var(--text);
+  background: none;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  cursor: pointer;
+}
+
+.import-src:hover,
+.import-src:focus-visible {
+  background: var(--bg-hover);
+  border-color: var(--border-strong);
+  outline: none;
+}
+
+.import-logo {
+  flex: none;
+  width: 40px;
+  height: 40px;
+  object-fit: contain;
+}
+
+.import-text {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.import-name {
+  font-weight: 600;
+}
+
+.import-hint {
+  font-size: 12px;
+  color: var(--text-3);
+}
+
 .pwd-note span {
   color: var(--text-2);
 }
@@ -662,6 +713,68 @@ body {
 
 .check-rows label:hover {
   color: var(--text);
+}
+
+/* MCP 服务设置弹窗 */
+.mcp-enable {
+  margin-bottom: 12px;
+}
+
+.mcp-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 0 0 10px 94px;
+  color: var(--text-2);
+}
+
+.mcp-error {
+  margin: 0 0 10px 94px;
+  padding: 6px 10px;
+  border-radius: var(--radius);
+  background: var(--danger-bg);
+  color: var(--danger-text);
+}
+
+.mcp-agents-title {
+  margin: 14px 0 6px 94px;
+  font-weight: 600;
+}
+
+.mcp-list {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  max-height: 130px;
+  overflow-y: auto;
+  margin: 0 0 10px 94px;
+  padding: 8px 10px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+}
+
+.mcp-row {
+  display: grid;
+  grid-template-columns: minmax(80px, 1fr) minmax(0, 2fr) auto;
+  gap: 10px;
+  align-items: center;
+  font-size: 12px;
+}
+
+.mcp-cmd {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-3);
+  font-family: "Cascadia Code", Consolas, monospace;
+}
+
+.mcp-live {
+  color: var(--accent);
+}
+
+.mcp-closed {
+  color: var(--text-3);
 }
 
 .dialog-footer {
