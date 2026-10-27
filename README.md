@@ -2,8 +2,12 @@
   <img src="public/app-icon.png" width="128" height="128" alt="OneCRT">
 
   # OneCRT
+  ### 跨平台 SSH2 终端客户端
 
-  跨平台 SSH2 终端客户端 · Tauri 2 + Rust（russh）+ React + xterm.js
+  <img src="site/assets/shot-terminal-dark.png" width="880" alt="深色主题主界面：左侧会话管理器按生产 / 预发分组，web-01 已选中；中间 web-01 终端标签页里跑 kubectl、df、systemctl；状态栏显示 root@203.0.113.11:22 已连接"><br>
+  <sub>会话树 + 终端标签页</sub><br><br>
+  <img src="site/assets/shot-files-dark.png" width="880" alt="文件面板（SFTP）：左栏本地 C:\Users\demo\deploy 列出 certs、releases、scripts、compose.yaml、nginx.conf、app-2026.10.26.tgz、deploy.sh；右栏远端 root@203.0.113.11 的 /srv/shop 列出 app、config、public、storage、artisan、deploy.log、VERSION；下方是空的传输区"><br>
+  <sub>文件面板（SFTP）与传输区</sub>
 </div>
 
 安装包在 [Releases](https://github.com/SpringHgui/onecrt/releases)，当前 v0.2.0：Windows（NSIS）、Linux（deb + AppImage）、macOS（Apple Silicon dmg）。

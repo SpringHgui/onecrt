@@ -1,0 +1,841 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <script>
+      (function () {
+        var q = new URLSearchParams(location.search).get("lang");
+        if (q !== "zh" && q !== "en") return;
+        try {
+          localStorage.setItem("onecrt.lang", q);
+        } catch (e) {}
+        history.replaceState(null, "", location.pathname + location.hash);
+      })();
+      // 进场动画只在有 JS 时生效，脚本被禁用时内容照常可见
+      document.documentElement.classList.add("js");
+    </script>
+    <title>OneCRT - Every server, in one window | Cross-platform SSH client</title>
+    <meta
+      name="description"
+      content="Every server, in one window: session tree, tabbed xterm terminals, a command library and an SFTP panel in one native app. Import your SecureCRT and WinSCP configs whole, and let AI agents drive sessions through the built-in MCP server. Windows, macOS and Linux, free, credentials stay on your machine."
+    />
+    <meta name="keywords" content="SSH client, SecureCRT alternative, cross-platform terminal, SFTP, session manager, MCP server, Rust, Tauri, Windows, macOS, Linux" />
+    <meta name="robots" content="index, follow, max-image-preview:large" />
+    <meta name="author" content="SpringHgui" />
+    <meta name="theme-color" content="#2bdb5c" />
+    <link rel="canonical" href="https://springhgui.github.io/onecrt/en/" />
+    <link rel="alternate" hreflang="zh-Hans" href="https://springhgui.github.io/onecrt/" />
+    <link rel="alternate" hreflang="en" href="https://springhgui.github.io/onecrt/en/" />
+    <link rel="alternate" hreflang="x-default" href="https://springhgui.github.io/onecrt/en/" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="OneCRT" />
+    <meta property="og:locale" content="en_US" />
+    <meta property="og:url" content="https://springhgui.github.io/onecrt/en/" />
+    <meta property="og:title" content="OneCRT - Every server, in one window" />
+    <meta
+      property="og:description"
+      content="Session tree, tabbed terminals, command library and SFTP in one native app. Import your SecureCRT and WinSCP configs whole, plus an MCP server for AI agents. Free, credentials stay on your machine."
+    />
+    <meta property="og:image" content="https://springhgui.github.io/onecrt/assets/og.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="OneCRT social card: every server, in one window" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="OneCRT - Every server, in one window" />
+    <meta
+      name="twitter:description"
+      content="Session tree, tabbed terminals, command library and SFTP in one native app. Import your SecureCRT and WinSCP configs whole, plus an MCP server for AI agents. Free, credentials stay on your machine."
+    />
+    <meta name="twitter:image" content="https://springhgui.github.io/onecrt/assets/og.png" />
+    <link rel="icon" type="image/svg+xml" href="../assets/logo.svg" />
+    <link rel="apple-touch-icon" href="../assets/logo.png" />
+    <link rel="stylesheet" href="../assets/styles.css" />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "SoftwareApplication",
+            "@id": "https://springhgui.github.io/onecrt/en/#app",
+            "name": "OneCRT",
+            "alternateName": "ShellX",
+            "applicationCategory": "DeveloperApplication",
+            "operatingSystem": "Windows 10 or later, macOS 12 or later (Apple Silicon), Linux x86_64",
+            "softwareVersion": "0.2.0",
+            "url": "https://springhgui.github.io/onecrt/en/",
+            "downloadUrl": "https://github.com/SpringHgui/onecrt/releases/latest",
+            "codeRepository": "https://github.com/SpringHgui/onecrt",
+            "sameAs": ["https://gitee.com/SpringHgui/onecrt"],
+            "datePublished": "2026-10-27",
+            "inLanguage": ["zh-Hans", "en"],
+            "description": "OneCRT is a cross-platform SSH client for Windows, macOS and Linux with a session manager, terminal tabs, a command library, an SFTP panel and a built-in MCP server for AI agents.",
+            "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+            "creator": { "@type": "Person", "name": "SpringHgui", "url": "https://github.com/SpringHgui" },
+            "featureList": [
+              "Session tree with folders",
+              "Quick connect with four authentication methods",
+              "Tabbed xterm.js terminals on a real SSH PTY",
+              "Command library with scoped broadcast",
+              "SFTP file panel with transfer list",
+              "Import of SecureCRT and WinSCP configurations",
+              "Built-in MCP server for AI agents",
+              "Dark and light themes with in-app updates"
+            ]
+          },
+          {
+            "@type": "FAQPage",
+            "@id": "https://springhgui.github.io/onecrt/en/#faq-jsonld",
+            "mainEntity": [
+              {
+                "@type": "Question",
+                "name": "Does OneCRT cost anything? Do I need an account?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "No and no. Installers come straight from GitHub Releases, every feature is included, and there is no trial period or paid tier."
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "Which SSH authentication methods are supported?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "Password, public key (OpenSSH private keys, with ~ expansion), keyboard-interactive and GSSAPI. A session can hold several methods tried in order, and a failure reports the specific reason rather than a generic error."
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "Where are hosts and passwords stored?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "Only in the app data directory on your machine; nothing is uploaded. On Windows passwords are encrypted with the system DPAPI before they hit disk. Other platforms have no portable system key store, so passwords are stored in plaintext in the same session file - keep that directory on an encrypted volume."
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "Can I migrate from SecureCRT or WinSCP?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "Yes. File - Import from Another Client reads a SecureCRT session export (XML) or WinSCP.ini, and appends the parsed sessions together with their folder hierarchy. Neither config format carries a usable plaintext password, so imported sessions ask for credentials on first connect."
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "Which operating systems and architectures are supported?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "Windows x64 (NSIS installer), macOS 12 or later on Apple Silicon (dmg), and Linux x86_64 (deb and AppImage). Installer file names still use the shellx prefix, which is also the name of the local data directory."
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "macOS says the app cannot be opened because it is from an unidentified developer",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "The macOS build is not signed with a Developer ID certificate or notarised. Right-click the app in Finder and choose Open the first time, or allow it under System Settings - Privacy & Security."
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "What is the MCP server and is it safe?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "When enabled, OneCRT serves Streamable HTTP MCP on 127.0.0.1 and exposes your saved sessions as tools to agents such as Qoder, Claude Desktop and Cursor. It is off by default, binds to loopback only, and every request must carry a Bearer token. Agents can only use credentials you already saved - they never receive or see the passwords themselves."
+                }
+              },
+              {
+                "@type": "Question",
+                "name": "Does OneCRT send usage data anywhere?",
+                "acceptedAnswer": {
+                  "@type": "Answer",
+                  "text": "There is no analytics or telemetry. Apart from SSH connections you start, the only network traffic is reading latest.json from GitHub Releases when you check for updates. This website is static and loads no tracking scripts either."
+                }
+              }
+            ]
+          }
+        ]
+      }
+    </script>
+  </head>
+
+  <body id="top">
+    <a class="skip" href="#main">Skip to main content</a>
+
+    <header class="site" id="site-head">
+      <div class="wrap">
+        <a class="brand" href="../"
+          ><img src="../assets/logo.svg" alt="OneCRT logo" width="28" height="28" />OneCRT</a
+        >
+        <nav class="main" aria-label="Main navigation">
+          <a href="#features">Features</a>
+          <a href="#interface">Interface</a>
+          <a href="#security">Security</a>
+          <a href="#mcp">MCP</a>
+          <a href="#download">Download</a>
+          <a href="#faq">FAQ</a>
+        </nav>
+        <div class="head-actions">
+          <a class="icon-btn" href="https://github.com/SpringHgui/onecrt" rel="noopener" aria-label="Source repository on GitHub"
+            ><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"
+              ><path
+                d="M12 2C6.48 2 2 6.58 2 12.25c0 4.53 2.87 8.37 6.84 9.73.5.1.68-.22.68-.49 0-.24-.01-1.05-.01-1.9-2.78.62-3.37-1.2-3.37-1.2-.45-1.19-1.11-1.5-1.11-1.5-.91-.64.07-.62.07-.62 1 .07 1.53 1.06 1.53 1.06.9 1.57 2.34 1.12 2.91.85.09-.66.35-1.12.63-1.38-2.22-.26-4.56-1.14-4.56-5.06 0-1.12.39-2.03 1.03-2.75-.1-.26-.45-1.3.1-2.71 0 0 .84-.28 2.75 1.05a9.3 9.3 0 0 1 2.5-.34c.85 0 1.71.12 2.5.34 1.91-1.33 2.75-1.05 2.75-1.05.55 1.41.2 2.45.1 2.71.64.72 1.03 1.63 1.03 2.75 0 3.93-2.35 4.8-4.58 5.05.36.32.68.94.68 1.9 0 1.37-.01 2.47-.01 2.81 0 .27.18.6.69.49A10.1 10.1 0 0 0 22 12.25C22 6.58 17.52 2 12 2Z"
+              /></svg
+          ></a>
+          <a class="icon-btn" href="https://gitee.com/SpringHgui/onecrt" rel="noopener" aria-label="Gitee mirror repository"
+            ><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"
+              ><path
+                d="M11.984 0A12 12 0 0 0 0 12a12 12 0 0 0 12 12 12 12 0 0 0 12-12A12 12 0 0 0 12 0a12 12 0 0 0-.016 0zm6.09 5.333c.328 0 .593.266.592.593v1.482a.594.594 0 0 1-.593.592H9.777c-.982 0-1.778.796-1.778 1.778v5.63c0 .327.266.592.593.592h5.63c.982 0 1.778-.796 1.778-1.778v-.296a.593.593 0 0 0-.592-.593h-4.15a.592.592 0 0 1-.592-.592v-1.482a.593.593 0 0 1 .593-.592h6.815c.327 0 .593.265.593.592v3.408a4 4 0 0 1-4 4H5.926a.593.593 0 0 1-.593-.593V9.778a4.444 4.444 0 0 1 4.445-4.444h8.296Z"
+              /></svg
+          ></a>
+          <a class="btn btn-dark btn-sm" href="#download">Download</a>
+        </div>
+        <details class="nav-toggle">
+          <summary aria-label="Open menu"
+            ><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" aria-hidden="true"
+              ><path d="M4 7h16M4 12h16M4 17h16" /></svg
+          ></summary>
+          <div>
+            <a href="#features">Features</a>
+            <a href="#interface">Interface</a>
+            <a href="#security">Security</a>
+            <a href="#mcp">MCP</a>
+            <a href="#download">Download</a>
+            <a href="#faq">FAQ</a>
+            <a href="https://github.com/SpringHgui/onecrt" rel="noopener">GitHub</a>
+            <a href="https://gitee.com/SpringHgui/onecrt" rel="noopener">Gitee</a>
+          </div>
+        </details>
+      </div>
+    </header>
+
+    <main id="main">
+      <section class="hero">
+        <div class="wrap">
+          <h1>Every server,<br />in <span class="hl">one window</span></h1>
+          <p class="lede">
+            Session tree, tabs, command library and SFTP in one window. SecureCRT and WinSCP configs come across whole,
+            nothing lost. Tauri 2 + Rust, 3.7&nbsp;MB, no Electron - plus an MCP server for agents.
+          </p>
+          <p class="cta">
+            <a class="btn btn-dark" href="#download"
+              >Download OneCRT v0.2.0
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+                ><path d="M12 4v11" /><path d="m7.5 10.5 4.5 4.5 4.5-4.5" /><path d="M5 19h14" /></svg
+            ></a>
+          </p>
+          <p class="meta">
+            <span>Free, no account</span>
+            <span>Windows · macOS · Linux</span>
+            <span>Credentials stay local</span>
+            <span>Chinese / English</span>
+          </p>
+        </div>
+        <figure class="shot-hero">
+          <img
+            src="../assets/shot-terminal-dark-en.png"
+            alt="OneCRT in its dark theme: the session manager on the left lists production and staging hosts in folders, a connected web-01 terminal tab in the middle shows kubectl, df and systemctl output, and the status bar reads root@203.0.113.11:22 connected"
+            width="2508"
+            height="1400"
+            fetchpriority="high"
+          />
+        </figure>
+      </section>
+
+      <section id="features">
+        <div class="wrap">
+          <div class="intro reveal">
+            <span class="eyebrow">FEATURES</span>
+            <h2 class="sec">All built in,<br />nothing to switch to</h2>
+            <div>
+              <p>The layout follows the Session Manager / Quick Connect / Command Manager arrangement; the keyboard and the context menus both reach every action.</p>
+              <p>Four workflows below: connect, migrate, hand it to an agent, pick a colour scheme.</p>
+            </div>
+          </div>
+
+          <div class="tabbar reveal">
+            <div class="tabs" role="tablist" aria-label="Feature groups">
+              <button type="button" role="tab" id="tab-session" aria-controls="pane-session" aria-selected="true">Sessions &amp; terminals</button>
+              <button type="button" role="tab" id="tab-import" aria-controls="pane-import" aria-selected="false">Import</button>
+              <button type="button" role="tab" id="tab-mcp" aria-controls="pane-mcp" aria-selected="false">MCP server</button>
+              <button type="button" role="tab" id="tab-theme" aria-controls="pane-theme" aria-selected="false">Light theme</button>
+            </div>
+          </div>
+
+          <div class="showcase reveal" id="pane-session" role="tabpanel" aria-labelledby="tab-session">
+            <div class="showcase-body">
+              <h3>Sessions, one double-click away<span class="sub-line">Folders · filter · full context menu</span></h3>
+              <p>Sessions sit in a folder tree; double-click connects. Cut, copy, paste, rename and properties live in the context menu. The tree is persisted as JSON and comes back exactly as you left it.</p>
+              <ul class="ticks">
+                <li><b>A real SSH PTY</b> - several sessions at once, sized to the window</li>
+                <li>Connection state on the tab itself; idle keepalive runs at the <b>SSH layer</b></li>
+                <li>Toolbar and status bar on one screen: user, host and port at a glance</li>
+              </ul>
+            </div>
+            <div class="showcase-media">
+              <img src="../assets/shot-terminal-dark-en.png" alt="The session tree beside a terminal tab running kubectl and systemctl" width="2508" height="1400" loading="lazy" />
+            </div>
+          </div>
+
+          <div class="showcase reveal" id="pane-import" role="tabpanel" aria-labelledby="tab-import" hidden>
+            <div class="showcase-body">
+              <h3>Bring your SecureCRT / WinSCP setup<span class="sub-line">Session XML and WinSCP.ini</span></h3>
+              <p>File - Import from Another Client reads a SecureCRT session export or WinSCP.ini and appends the sessions with their folder hierarchy, so nothing has to be rebuilt host by host.</p>
+              <ul class="ticks">
+                <li>Both formats <b>keep their folder hierarchy</b></li>
+                <li>Neither config carries a usable plaintext password - <b>credentials are added on first connect</b></li>
+                <li>Import only appends; it <b>never overwrites</b> existing sessions</li>
+              </ul>
+            </div>
+            <div class="showcase-media">
+              <img src="../assets/shot-import-light.png" alt="The import dialog listing SecureCRT and WinSCP as sources" width="2508" height="1400" loading="lazy" />
+            </div>
+          </div>
+
+          <div class="showcase reveal" id="pane-mcp" role="tabpanel" aria-labelledby="tab-mcp" hidden>
+            <div class="showcase-body">
+              <h3>Hand sessions to an agent<span class="sub-line">Six tools · Bearer auth · loopback only</span></h3>
+              <p>Turn it on and OneCRT serves Streamable HTTP MCP on this machine, exposing saved sessions as tools: list, exec, send, read and close. The agent works in a real terminal.</p>
+              <ul class="ticks">
+                <li><b>exec reuses one shell per session</b>, so cd and export survive between calls</li>
+                <li>Output caps at 64 KB per call, with an offset for read to <b>continue from</b></li>
+                <li>Off by default, per-request auth, and <b>the agent never sees a password</b></li>
+              </ul>
+            </div>
+            <div class="showcase-media">
+              <img src="../assets/shot-mcp-dark.png" alt="The MCP server dialog: enable switch, port 39117, masked token with a rotate button, listen address and running agent sessions" width="2508" height="1400" loading="lazy" />
+            </div>
+          </div>
+
+          <div class="showcase reveal" id="pane-theme" role="tabpanel" aria-labelledby="tab-theme" hidden>
+            <div class="showcase-body">
+              <h3>Two themes, terminal included<span class="sub-line">UI and ANSI palette switch together</span></h3>
+              <p>Colour tokens live in one place; the interface and the terminal read the same variables. Switching moves foreground, background, cursor, selection and the ANSI palette together - the frame is not the only thing that changes.</p>
+              <ul class="ticks">
+                <li>Light frame, pure white content: <b>still readable on a projector</b></li>
+                <li>ANSI red, yellow and green tuned separately, so <b>Chinese errors stay legible on dark</b></li>
+                <li>Your choice is remembered locally and used on the next launch</li>
+              </ul>
+            </div>
+            <div class="showcase-media">
+              <img src="../assets/shot-terminal-light.png" alt="The light theme: session tree and an English terminal tab printing command output" width="2508" height="1400" loading="lazy" />
+            </div>
+          </div>
+
+          <div class="bento">
+            <article class="card reveal">
+              <span class="tile" aria-hidden="true"
+                ><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"
+                  ><path d="M13 2 4 14h7l-1 8 9-12h-7z" /></svg
+              ></span>
+              <h3>Quick connect, four auth methods</h3>
+              <p>Protocol, host, port and username on one screen. Public key, keyboard-interactive, password and GSSAPI are tried in your order, and a failure names the method that did not pass.</p>
+            </article>
+            <article class="card reveal">
+              <span class="tile" aria-hidden="true"
+                ><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"
+                  ><path d="M9 6h11M9 12h11M9 18h11" /><path d="M4 6h.01M4 12h.01M4 18h.01" /></svg
+              ></span>
+              <h3>Command library and broadcast</h3>
+              <p>The display name is stored separately from the text that is sent, multi-line included. Double-click sends to the current terminal, or broadcast to every ready session or only the visible one.</p>
+            </article>
+            <article class="card reveal">
+              <span class="tile" aria-hidden="true"
+                ><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"
+                  ><path d="M7 20V4M7 4 4 7.5M7 4l3 3.5" /><path d="M17 4v16M17 20l-3-3.5M17 20l3-3.5" /></svg
+              ></span>
+              <h3>SFTP file panel</h3>
+              <p>Local and remote panes side by side, with progress and a transfer list. Files move over the SSH session you already have, so there is no second client to keep open.</p>
+            </article>
+            <article class="card reveal">
+              <span class="tile" aria-hidden="true"
+                ><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"
+                  ><path d="M4 17l6-5-6-5" /><path d="M12 19h8" /></svg
+              ></span>
+              <h3>Disconnects say so</h3>
+              <p>A disconnect gives one clear message; press Enter to reconnect. No guessing games with silent auto-retry - idle timeouts are held off by SSH keepalive.</p>
+            </article>
+            <article class="card reveal">
+              <span class="tile" aria-hidden="true"
+                ><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"
+                  ><path d="M12 3v11" /><path d="M8 10.5 12 14.5l4-4" /><path d="M4 17v2a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-2" /></svg
+              ></span>
+              <h3>In-app updates</h3>
+              <p>Check for updates under Help - About. Windows and Linux AppImage upgrade themselves; macOS needs a signed build, so download the dmg and replace.</p>
+            </article>
+            <article class="card reveal">
+              <span class="tile" aria-hidden="true"
+                ><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"
+                  ><rect x="7" y="7" width="10" height="10" rx="2" /><path d="M10 2.5v3M14 2.5v3M10 18.5v3M14 18.5v3M2.5 10h3M2.5 14h3M18.5 10h3M18.5 14h3" /></svg
+              ></span>
+              <h3>One pipeline, three targets</h3>
+              <p>Windows x64, macOS Apple Silicon and Linux x86_64 are built by the same GitHub Actions workflow, with matching versions, update feed and checksums.</p>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section id="interface" class="slim">
+        <div class="wrap">
+          <div class="intro reveal">
+            <span class="eyebrow">INTERFACE</span>
+            <h2 class="sec">Light or dark,<br />both set well</h2>
+            <div>
+              <p>The palette comes from the two greens in the app icon; body and interface colours are checked against WCAG AA.</p>
+              <p>The terminal's ANSI red, yellow and green were tuned separately so Chinese error output stays readable on dark.</p>
+            </div>
+          </div>
+          <div class="shots">
+            <figure class="reveal">
+              <img
+                src="../assets/shot-import-light.png"
+                alt="The import-from-another-client dialog in the light theme, listing SecureCRT and WinSCP"
+                width="2508"
+                height="1400"
+                loading="lazy"
+              />
+              <figcaption><b>Import from another client</b> · light theme, English UI, sources keep their own marks</figcaption>
+            </figure>
+            <figure class="reveal">
+              <img
+                src="../assets/shot-terminal-light.png"
+                alt="The light theme: session tree and an English terminal tab printing command output"
+                width="2508"
+                height="1400"
+                loading="lazy"
+              />
+              <figcaption><b>Light theme</b> · light frame, pure white content, toolbar and status bar on one screen</figcaption>
+            </figure>
+          </div>
+        </div>
+      </section>
+
+      <section id="security" class="slim">
+        <div class="wrap">
+          <div class="panel reveal">
+            <div class="intro">
+              <span class="eyebrow">PRIVACY &amp; SECURITY</span>
+              <h2 class="sec">Credentials stay local,<br />never in a cloud</h2>
+              <div>
+                <p>No account system and no server. Sessions and passwords are written only to the app data directory on this machine.</p>
+                <p>MCP is off by default, binds 127.0.0.1 only, and checks a token on every request.</p>
+              </div>
+            </div>
+            <div class="sec-grid">
+              <article>
+                <span class="tile" aria-hidden="true"
+                  ><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"
+                    ><rect x="4" y="10" width="16" height="10" rx="2" /><path d="M8 10V7a4 4 0 0 1 8 0v3" /><path d="M12 14v2" /></svg
+                ></span>
+                <h3>Passwords encrypted at rest</h3>
+                <p>On Windows, passwords go through the system DPAPI before they hit disk. Other platforms have no portable system key store - keep the data directory on an encrypted volume.</p>
+              </article>
+              <article>
+                <span class="tile" aria-hidden="true"
+                  ><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"
+                    ><circle cx="12" cy="12" r="8" /><path d="M12 8v4l2.5 2.5" /></svg
+                ></span>
+                <h3>Loopback only</h3>
+                <p>The MCP server binds 127.0.0.1 on a configurable port. Every request must carry <code class="inline">Authorization: Bearer &lt;token&gt;</code>, and the token can be rotated.</p>
+              </article>
+              <article>
+                <span class="tile" aria-hidden="true"
+                  ><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"
+                    ><path d="M2 12s3.6-6 10-6 10 6 10 6-3.6 6-10 6-10-6-10-6z" /><circle cx="12" cy="12" r="2.6" /><path d="m4 20 16-16" /></svg
+                ></span>
+                <h3>Agents never see passwords</h3>
+                <p>An agent can only use credentials you already saved - it never receives or sees them. Turning the switch off also tears down any shell the agent left behind.</p>
+              </article>
+              <article>
+                <span class="tile" aria-hidden="true"
+                  ><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"
+                    ><path d="M3 12h18" /><path d="M12 3v18" /><circle cx="12" cy="12" r="9" /></svg
+                ></span>
+                <h3>No analytics, no telemetry</h3>
+                <p>Apart from SSH connections you start and latest.json when checking for updates, nothing leaves the app. This page is static and loads no tracking scripts either.</p>
+              </article>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="mcp">
+        <div class="wrap">
+          <div class="intro reveal">
+            <span class="eyebrow">MODEL CONTEXT PROTOCOL</span>
+            <h2 class="sec">Let an agent<br />run your SSH</h2>
+            <div>
+              <p>
+                File - MCP Server... once enabled, OneCRT serves Streamable HTTP MCP at
+                <code class="inline">127.0.0.1:39117/mcp</code> (port configurable) and exposes saved sessions as six
+                tools.
+              </p>
+              <p>Copy the config from the dialog straight into Qoder, Claude Desktop or Cursor.</p>
+            </div>
+          </div>
+          <div class="mcp-split">
+            <div class="reveal">
+              <h3>Six tools, all scoped to sessions you saved</h3>
+              <ul class="ticks">
+                <li>
+                  <code class="inline">sessions_list</code>, <code class="inline">terminals_list</code>, <code class="inline">exec</code>, <code class="inline">send</code>, <code class="inline">read</code>, <code class="inline">close</code>
+                </li>
+                <li><b>A command has a completion signal.</b> exec reuses one shell per session, so cd and export survive between calls; an appended echo sentinel marks the end, and the reply carries the exit code.</li>
+                <li><b>Output is capped, and can be resumed.</b> 64 KB per reply; anything beyond that comes back as an offset for read.</li>
+                <li><b>Off by default, loopback only, per-request auth.</b> The dialog refreshes every two seconds and lists running sessions with their last command.</li>
+              </ul>
+            </div>
+            <div class="reveal">
+              <p class="code-cap">The copy button hands you a config you can paste straight into a client:</p>
+              <pre class="code"><code>{
+  <span class="k">"mcpServers"</span>: {
+    <span class="k">"onecrt"</span>: {
+      <span class="k">"type"</span>: <span class="s">"http"</span>,
+      <span class="k">"url"</span>: <span class="s">"http://127.0.0.1:39117/mcp"</span>,
+      <span class="k">"headers"</span>: { <span class="k">"Authorization"</span>: <span class="s">"Bearer &lt;your token&gt;"</span> }
+    }
+  }
+}</code></pre>
+            </div>
+          </div>
+          <figure class="mcp-wide reveal">
+            <img
+              src="../assets/shot-mcp-dark.png"
+              alt="The MCP server dialog: enable switch, port 39117, masked token with a rotate button, listen address and running agent sessions"
+              width="2508"
+              height="1400"
+              loading="lazy"
+            />
+            <figcaption>The MCP server dialog: port, token (masked by default) and the agent sessions in flight</figcaption>
+          </figure>
+        </div>
+      </section>
+
+      <section class="compat slim">
+        <div class="wrap">
+          <div class="center-head reveal">
+            <span class="eyebrow">INTEROP</span>
+            <h2 class="sec">Connects to what you already use</h2>
+            <p>The migration path at the SSH layer is kept: configs come across, and agents call tools on the same sessions.</p>
+          </div>
+          <div class="logos reveal">
+            <div class="logo-card">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+                ><rect x="3" y="4" width="18" height="16" rx="2" /><path d="M7 9h4M7 13h7" /></svg
+              >
+              SecureCRT <span class="tag">import XML</span>
+            </div>
+            <div class="logo-card">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+                ><path d="M4 6h16M4 12h10M4 18h13" /></svg
+              >
+              WinSCP <span class="tag">import ini</span>
+            </div>
+            <div class="logo-card">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+                ><path d="M8 7 4 12l4 5" /><path d="m16 7 4 5-4 5" /><path d="m13 6-2 12" /></svg
+              >
+              Qoder <span class="tag">MCP client</span>
+            </div>
+            <div class="logo-card">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+                ><circle cx="12" cy="12" r="8" /><path d="M9 15c1.6 1.2 4.4 1.2 6 0" /><path d="M9.5 10h.01M14.5 10h.01" /></svg
+              >
+              Claude Desktop <span class="tag">MCP client</span>
+            </div>
+            <div class="logo-card">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+                ><rect x="4" y="3" width="16" height="18" rx="2" /><path d="M9 7h6M9 11h6M9 15h3" /></svg
+              >
+              Cursor <span class="tag">MCP client</span>
+            </div>
+          </div>
+        </div>
+      </section>
+
+      <section id="download">
+        <div class="wrap">
+          <div class="intro reveal">
+            <span class="eyebrow">DOWNLOAD</span>
+            <h2 class="sec">Current version v0.2.0</h2>
+            <div>
+              <p>Installers and checksums live on GitHub Releases - download directly, no account, no feature limits.</p>
+              <p>Windows and Linux AppImage update in place; macOS needs a manual dmg for now.</p>
+            </div>
+          </div>
+          <div class="dl">
+            <article class="card reveal" data-os="windows">
+              <div class="os">
+                <svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"
+                  ><path d="M3 5.5 10.5 4.4v7.1H3V5.5Zm0 7.1h7.5v7.1L3 18.5v-5.9Zm8.6-8.4L21 3v8.5h-9.4V4.2Zm0 8.4H21V21l-9.4-1.4v-7Z" /></svg
+                >
+                <h3>Windows</h3>
+                <span class="now">This device</span>
+              </div>
+              <p class="req">Windows 10 / 11 · x64</p>
+              <p class="file">shellx-0.2.0-windows-x64-setup.exe</p>
+              <p class="size">about 3.7 MB · NSIS installer</p>
+              <a class="btn btn-dark btn-sm btn-full" href="https://github.com/SpringHgui/onecrt/releases/download/v0.2.0/shellx-0.2.0-windows-x64-setup.exe" rel="noopener">Download for Windows</a>
+            </article>
+            <article class="card reveal" data-os="macos">
+              <div class="os">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+                  ><rect x="2.5" y="4" width="19" height="13" rx="2" /><path d="M8 20h8" /><path d="M12 17v3" /></svg
+                >
+                <h3>macOS</h3>
+                <span class="now">This device</span>
+              </div>
+              <p class="req">macOS 12 or later · Apple Silicon</p>
+              <p class="file">shellx-0.2.0-macos-arm64.dmg</p>
+              <p class="size">about 4.9 MB · unsigned, right-click → Open the first time</p>
+              <a class="btn btn-dark btn-sm btn-full" href="https://github.com/SpringHgui/onecrt/releases/download/v0.2.0/shellx-0.2.0-macos-arm64.dmg" rel="noopener">Download for macOS</a>
+            </article>
+            <article class="card reveal" data-os="linux">
+              <div class="os">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+                  ><rect x="2.5" y="4" width="19" height="16" rx="2" /><path d="m7 9 3 3-3 3" /><path d="M12.5 15H17" /></svg
+                >
+                <h3>Linux</h3>
+                <span class="now">This device</span>
+              </div>
+              <p class="req">x86_64 distributions</p>
+              <p class="file">shellx-0.2.0-linux-x64.deb · shellx-0.2.0-linux-x64.AppImage</p>
+              <p class="size">deb about 6.2 MB · AppImage about 84.6 MB</p>
+              <div class="pair">
+                <a class="btn btn-dark btn-sm btn-full" href="https://github.com/SpringHgui/onecrt/releases/download/v0.2.0/shellx-0.2.0-linux-x64.deb" rel="noopener">Download deb</a>
+                <a class="btn btn-line btn-sm btn-full" href="https://github.com/SpringHgui/onecrt/releases/download/v0.2.0/shellx-0.2.0-linux-x64.AppImage" rel="noopener">AppImage</a>
+              </div>
+            </article>
+          </div>
+          <p class="note">
+            Installer file names still use the shellx prefix, which is also the local data directory name; the app calls
+            itself OneCRT. Windows and Linux (AppImage) support in-app updates; macOS needs a Developer ID signature for
+            Tauri's updater, so download the dmg for now. <a href="https://github.com/SpringHgui/onecrt/releases" rel="noopener">All artifacts and
+            SHA256</a>
+          </p>
+        </div>
+      </section>
+
+      <section id="faq" class="slim">
+        <div class="wrap">
+          <div class="center-head reveal">
+            <span class="eyebrow">FAQ</span>
+            <h2 class="sec">Asked before the first connect</h2>
+          </div>
+          <div class="faq">
+            <details open>
+              <summary>Does OneCRT cost anything? Do I need an account?</summary>
+              <div>
+                <p>No and no. Installers come straight from GitHub Releases, every feature is included, and there is no trial period or paid tier.</p>
+              </div>
+            </details>
+            <details>
+              <summary>Which SSH authentication methods are supported?</summary>
+              <div>
+                <p>Password, public key (OpenSSH private keys, with <code class="inline">~</code> expansion), keyboard-interactive and GSSAPI. A session can hold several methods tried in order, and a failure reports the specific reason rather than a generic "cannot connect".</p>
+              </div>
+            </details>
+            <details>
+              <summary>Where are hosts and passwords stored?</summary>
+              <div>
+                <p>Only in the app data directory on your machine; nothing is uploaded. On Windows passwords are encrypted with the system DPAPI before they hit disk. Other platforms have no portable system key store, so passwords are stored in plaintext in the same session file - keep that directory on an encrypted volume.</p>
+                <p>Help - About OneCRT... shows the exact path, with an Open button that takes you there.</p>
+              </div>
+            </details>
+            <details>
+              <summary>Can I migrate from SecureCRT or WinSCP?</summary>
+              <div>
+                <p>Yes. File - Import from Another Client reads a SecureCRT session export (XML) or WinSCP.ini, and appends the parsed sessions together with their folder hierarchy.</p>
+                <p>Neither config format carries a usable plaintext password, so imported sessions ask for credentials on first connect. SecureCRT and WinSCP are trademarks and products of their respective owners; OneCRT is not affiliated with them.</p>
+              </div>
+            </details>
+            <details>
+              <summary>Which operating systems and architectures are supported?</summary>
+              <div>
+                <p>Windows x64 (NSIS installer), macOS 12 or later on Apple Silicon (dmg), and Linux x86_64 (deb and AppImage). All three come off the same GitHub Actions pipeline.</p>
+              </div>
+            </details>
+            <details>
+              <summary>macOS says the app cannot be opened because it is from an unidentified developer</summary>
+              <div>
+                <p>The macOS build is not signed with a Developer ID certificate or notarised. Right-click the app in Finder and choose Open the first time, or allow it under System Settings - Privacy &amp; Security.</p>
+              </div>
+            </details>
+            <details>
+              <summary>What is the MCP server and is it safe?</summary>
+              <div>
+                <p>When enabled, OneCRT serves Streamable HTTP MCP on 127.0.0.1 and exposes your saved sessions as tools to agents such as Qoder, Claude Desktop and Cursor.</p>
+                <p>It is off by default, binds to loopback only, and every request must carry a Bearer token. Agents can only use credentials you already saved - they never receive or see the passwords themselves.</p>
+              </div>
+            </details>
+            <details>
+              <summary>Does OneCRT send usage data anywhere?</summary>
+              <div>
+                <p>There is no analytics or telemetry. Apart from SSH connections you start, the only network traffic is reading latest.json from GitHub Releases when you check for updates. This website is static and loads no tracking scripts either.</p>
+              </div>
+            </details>
+          </div>
+        </div>
+      </section>
+
+      <section class="final-cta" aria-labelledby="final-title">
+        <div class="wrap">
+          <h2 id="final-title">Install it, reach the first host in a minute</h2>
+          <p>A 3.7 MB installer, next-next-finish. No sign-up and no online activation.</p>
+          <p class="cta">
+            <a class="btn btn-dark" href="#download"
+              >Download OneCRT v0.2.0
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"
+                ><path d="M12 4v11" /><path d="m7.5 10.5 4.5 4.5 4.5-4.5" /><path d="M5 19h14" /></svg
+            ></a>
+          </p>
+        </div>
+      </section>
+    </main>
+
+    <footer class="site">
+      <div class="wrap">
+        <div class="foot-grid">
+          <div class="foot-brand">
+            <a class="brand" href="../"><img src="../assets/logo.svg" alt="OneCRT logo" width="28" height="28" />OneCRT</a>
+            <p>A cross-platform SSH client: sessions, terminal tabs, a command library, SFTP, and an MCP server for agents.</p>
+          </div>
+          <div>
+            <h3>Product</h3>
+            <ul>
+              <li><a href="#features">Features</a></li>
+              <li><a href="#interface">Interface</a></li>
+              <li><a href="#security">Security</a></li>
+              <li><a href="#download">Download</a></li>
+            </ul>
+          </div>
+          <div>
+            <h3>Project</h3>
+            <ul>
+              <li><a href="https://github.com/SpringHgui/onecrt" rel="noopener">Source</a></li>
+              <li><a href="https://gitee.com/SpringHgui/onecrt" rel="noopener">Gitee mirror</a></li>
+              <li><a href="https://github.com/SpringHgui/onecrt/releases" rel="noopener">Releases</a></li>
+              <li><a href="https://github.com/SpringHgui/onecrt/issues" rel="noopener">Open an issue</a></li>
+              <li><a href="https://github.com/SpringHgui/onecrt/blob/master/NOTICE.md" rel="noopener">Third-party notices</a></li>
+            </ul>
+          </div>
+          <div>
+            <h3>Language</h3>
+            <ul>
+              <li><a href="../?lang=zh" hreflang="zh-Hans" lang="zh-CN" rel="alternate">中文</a></li>
+              <li><a href="./?lang=en" hreflang="en" lang="en" rel="alternate">English</a></li>
+            </ul>
+          </div>
+        </div>
+        <div class="legal">
+          <span>© 2026 SpringHgui</span>
+          <span>Static page, no analytics or ad scripts</span>
+          <span>SecureCRT and WinSCP are trademarks of their respective owners</span>
+        </div>
+      </div>
+      <div class="foot-mark" aria-hidden="true">ONECRT</div>
+    </footer>
+
+    <script>
+      (function () {
+        // ---- 功能切换：按钮 aria-selected + 面板 hidden，无 JS 时第一组照常显示 ----
+        var tabs = Array.prototype.slice.call(document.querySelectorAll('.tabs [role="tab"]'));
+        function selectTab(btn) {
+          tabs.forEach(function (b) {
+            var on = b === btn;
+            b.setAttribute("aria-selected", on ? "true" : "false");
+            b.tabIndex = on ? 0 : -1;
+            var pane = document.getElementById(b.getAttribute("aria-controls"));
+            if (pane) pane.hidden = !on;
+          });
+        }
+        tabs.forEach(function (btn, i) {
+          btn.tabIndex = btn.getAttribute("aria-selected") === "true" ? 0 : -1;
+          btn.addEventListener("click", function () {
+            selectTab(btn);
+          });
+          btn.addEventListener("keydown", function (e) {
+            var step = e.key === "ArrowRight" ? 1 : e.key === "ArrowLeft" ? -1 : 0;
+            if (!step) return;
+            e.preventDefault();
+            var next = tabs[(i + step + tabs.length) % tabs.length];
+            selectTab(next);
+            next.focus();
+          });
+        });
+
+        // ---- 按 UA 标出当前设备：纯前端判断，不上报 ----
+        var ua = navigator.userAgent || "";
+        var os = /Windows/i.test(ua)
+          ? "windows"
+          : /Mac OS X|Macintosh/i.test(ua)
+            ? "macos"
+            : /Linux|X11/i.test(ua)
+              ? "linux"
+              : "";
+        if (os) {
+          var card = document.querySelector('[data-os="' + os + '"]');
+          if (card) card.classList.add("is-current");
+        }
+
+        // ---- 顶栏滚动态 ----
+        var head = document.getElementById("site-head");
+        var links = [];
+        function onScroll() {
+          if (!head) return;
+          head.classList.toggle("stuck", window.scrollY > 8);
+          // 停在首屏时不该有任何菜单项处于选中态
+          if (window.scrollY < 120) links.forEach(function (a) { a.classList.remove("active"); });
+        }
+        window.addEventListener("scroll", onScroll, { passive: true });
+        onScroll();
+
+        // ---- 进场动画 + 当前区块高亮 ----
+        var reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+        var items = document.querySelectorAll(".reveal");
+        if (!reduce && "IntersectionObserver" in window) {
+          var io = new IntersectionObserver(
+            function (entries) {
+              entries.forEach(function (en) {
+                if (en.isIntersecting) {
+                  en.target.classList.add("in");
+                  io.unobserve(en.target);
+                }
+              });
+            },
+            { rootMargin: "0px 0px -12% 0px", threshold: 0.08 }
+          );
+          items.forEach(function (el) {
+            io.observe(el);
+          });
+        } else {
+          items.forEach(function (el) {
+            el.classList.add("in");
+          });
+        }
+
+        links = Array.prototype.slice.call(document.querySelectorAll("nav.main a[href^='#']"));
+        var sections = links
+          .map(function (a) {
+            return document.querySelector(a.getAttribute("href"));
+          })
+          .filter(Boolean);
+        if ("IntersectionObserver" in window && sections.length) {
+          var spy = new IntersectionObserver(
+            function (entries) {
+              entries.forEach(function (en) {
+                if (!en.isIntersecting) return;
+                links.forEach(function (a) {
+                  a.classList.toggle("active", a.getAttribute("href") === "#" + en.target.id);
+                });
+              });
+            },
+            { rootMargin: "-45% 0px -50% 0px" }
+          );
+          sections.forEach(function (s) {
+            spy.observe(s);
+          });
+        }
+      })();
+    </script>
+  </body>
+</html>

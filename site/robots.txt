@@ -1,0 +1,4 @@
+User-agent: *
+Allow: /
+
+Sitemap: https://springhgui.github.io/onecrt/sitemap.xml
