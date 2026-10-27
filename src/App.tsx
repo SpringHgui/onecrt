@@ -1967,7 +1967,7 @@ export default function App() {
 
   return (
     <div className="shell">
-      <TitleBar menus={menus} menuVisible={view.menuBar} title={activeTabObj?.title ?? "ShellX"} />
+      <TitleBar menus={menus} menuVisible={view.menuBar} title={activeTabObj?.title ?? "OneCRT"} />
       {view.toolbar && (
         <Toolbar
           quickConnect={() =>

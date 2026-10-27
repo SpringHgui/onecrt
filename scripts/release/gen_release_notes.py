@@ -98,7 +98,7 @@ def main() -> int:
         "",
         "- **Windows**：装 `*-windows-x64-setup.exe`。未做代码签名，首启会有 SmartScreen 提示，点「仍要运行」即可。",
         "- **Linux**：Debian/Ubuntu 用 `*.deb`（`sudo apt install ./包名.deb`）；其他发行版用 `*.AppImage`（`chmod +x` 后直接运行）。",
-        "- **macOS**：装 `*.dmg`。未做 Apple 公证，首次打开需在「系统设置 → 隐私与安全性」里允许，或 `xattr -dr com.apple.quarantine /Applications/shellx.app`。",
+        "- **macOS**：装 `*.dmg`。未做 Apple 公证，首次打开需在「系统设置 → 隐私与安全性」里允许，或 `xattr -dr com.apple.quarantine /Applications/OneCRT.app`。",
         "",
         "应用内更新（「帮助 → 关于 → 检查更新」）走本 Release 的 `latest.json`：Windows 与 Linux(AppImage) 可直接自助升级；"
         "macOS 的自动更新需要 Developer ID 签名，未签名的包请手动下载 dmg。",

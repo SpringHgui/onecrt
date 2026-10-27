@@ -79,7 +79,7 @@ def main() -> int:
 
     manifest = {
         "version": a.version,
-        "notes": a.notes or f"ShellX {a.version}",
+        "notes": a.notes or f"OneCRT {a.version}",
         "pub_date": datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),
         "platforms": platforms,
     }

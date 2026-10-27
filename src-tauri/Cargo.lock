@@ -3317,6 +3317,35 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "9f7c3e4beb33f85d45ae3e3a1792185706c8e16d043238c593331cc7cd313b50"
 
 [[package]]
+name = "onecrt"
+version = "0.2.0"
+dependencies = [
+ "anyhow",
+ "arboard",
+ "axum",
+ "dirs 6.0.0",
+ "futures-util",
+ "getrandom 0.3.4",
+ "reqwest",
+ "rfd",
+ "rmcp",
+ "roxmltree",
+ "russh",
+ "russh-sftp",
+ "rustls",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-opener",
+ "tauri-plugin-process",
+ "tauri-plugin-updater",
+ "tokio",
+ "tokio-util",
+ "windows",
+]
+
+[[package]]
 name = "open"
 version = "5.4.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4873,35 +4902,6 @@ dependencies = [
  "digest 0.11.3",
  "keccak",
  "sponge-cursor",
-]
-
-[[package]]
-name = "shellx"
-version = "0.2.0"
-dependencies = [
- "anyhow",
- "arboard",
- "axum",
- "dirs 6.0.0",
- "futures-util",
- "getrandom 0.3.4",
- "reqwest",
- "rfd",
- "rmcp",
- "roxmltree",
- "russh",
- "russh-sftp",
- "rustls",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-opener",
- "tauri-plugin-process",
- "tauri-plugin-updater",
- "tokio",
- "tokio-util",
- "windows",
 ]
 
 [[package]]

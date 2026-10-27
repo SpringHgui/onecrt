@@ -1,7 +1,7 @@
-//! MCP 服务：把 shellx 已存的 SSH 会话能力暴露给外部 agent（Qoder / Claude Desktop 等）。
+//! MCP 服务：把 onecrt 已存的 SSH 会话能力暴露给外部 agent（Qoder / Claude Desktop 等）。
 //!
 //! 三条底线：默认关闭、只听 127.0.0.1、每个请求都要带 `Authorization: Bearer <token>`。
-//! agent 侧拿不到口令——它只能按会话名点用 shellx 已存的凭据，工具输出里也不回传凭据内容。
+//! agent 侧拿不到口令——它只能按会话名点用 onecrt 已存的凭据，工具输出里也不回传凭据内容。
 
 use crate::sessions::{self, Node, SshSession};
 use crate::terminal::{self, OpenArgs, OutEvent};
@@ -47,8 +47,8 @@ const MAX_TIMEOUT_SECS: u64 = 600;
 const AGENT_COLS: u16 = 200;
 const AGENT_ROWS: u16 = 50;
 
-const INSTRUCTIONS: &str = "ShellX is a desktop SSH client holding saved sessions for internal hosts. \
-Call sessions_list to discover targets, then exec to run one command with the credentials ShellX already \
+const INSTRUCTIONS: &str = "OneCRT is a desktop SSH client holding saved sessions for internal hosts. \
+Call sessions_list to discover targets, then exec to run one command with the credentials OneCRT already \
 has (a password is never accepted or returned). exec reuses one live shell per saved session, so cd and \
 exported variables carry across calls; use send/read for interactive programs, and close when done.";
 
@@ -325,7 +325,7 @@ async fn start(state: &Shared) -> Result<(), String> {
 
     let ct = CancellationToken::new();
     let service = StreamableHttpService::new(
-        move || Ok(ShellxMcp::new(term.clone(), agents.clone())),
+        move || Ok(OnecrtMcp::new(term.clone(), agents.clone())),
         LocalSessionManager::default().into(),
         StreamableHttpServerConfig::default()
             .with_cancellation_token(ct.child_token())
@@ -445,7 +445,7 @@ async fn guard(
 // ------------------------------------------------------------------ MCP 工具
 
 #[derive(Clone)]
-pub struct ShellxMcp {
+pub struct OnecrtMcp {
     term: terminal::Shared,
     agents: Arc<Mutex<HashMap<String, Arc<Agent>>>>,
 }
@@ -494,7 +494,7 @@ struct CloseArgs {
 /// 命令后面追的结束标记。PTY 会回显整行 echo，但回显里是字面量 `$?`，
 /// 只有真执行完才打印出数字，所以按「前缀+数字」匹配不会把回显当成结果。
 fn marker_prefix() -> String {
-    format!("SHELLX-MCP-{}:", random_hex(4))
+    format!("ONECRT-MCP-{}:", random_hex(4))
 }
 
 /// 见到标记后的数字就给出退出码；解析不出数字时算结束但退出码未知
@@ -580,9 +580,9 @@ fn find_session(want: &str) -> Option<SshSession> {
 }
 
 #[tool_router]
-impl ShellxMcp {
+impl OnecrtMcp {
     fn new(term: terminal::Shared, agents: Arc<Mutex<HashMap<String, Arc<Agent>>>>) -> Self {
-        ShellxMcp { term, agents }
+        OnecrtMcp { term, agents }
     }
 
     #[tool(
@@ -636,7 +636,7 @@ impl ShellxMcp {
 
     #[tool(
         name = "exec",
-        description = "Run one command line on a saved SSH session using the credentials ShellX stores, wait for it to finish, and return its output with the exit code. The shell stays open and is reused per session, so cd and exported variables carry across calls."
+        description = "Run one command line on a saved SSH session using the credentials OneCRT stores, wait for it to finish, and return its output with the exit code. The shell stays open and is reused per session, so cd and exported variables carry across calls."
     )]
     async fn exec(&self, Parameters(args): Parameters<ExecArgs>) -> Result<CallToolResult, McpError> {
         let session = match find_session(&args.session) {
@@ -650,7 +650,7 @@ impl ShellxMcp {
         };
         if credentials_of(&session) == "none" {
             return tool_error(format!(
-                "session {:?} has no stored password or key; connect it once in ShellX and save the credentials",
+                "session {:?} has no stored password or key; connect it once in OneCRT and save the credentials",
                 args.session
             ));
         }
@@ -748,10 +748,10 @@ impl ShellxMcp {
 }
 
 #[tool_handler]
-impl ServerHandler for ShellxMcp {
+impl ServerHandler for OnecrtMcp {
     fn get_info(&self) -> ServerConfig {
         ServerConfig::new(ServerCapabilities::builder().enable_tools().build())
-            .with_server_info(Implementation::new("shellx", env!("CARGO_PKG_VERSION")))
+            .with_server_info(Implementation::new("onecrt", env!("CARGO_PKG_VERSION")))
             .with_instructions(INSTRUCTIONS)
     }
 }
@@ -776,7 +776,7 @@ fn status_of_agents(agents: &Arc<Mutex<HashMap<String, Arc<Agent>>>>) -> Vec<Age
     rows
 }
 
-impl ShellxMcp {
+impl OnecrtMcp {
     fn agent(&self, terminal_id: &str) -> Option<Arc<Agent>> {
         self.agents.lock().unwrap().get(terminal_id).cloned()
     }

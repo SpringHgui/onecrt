@@ -1,6 +1,6 @@
 name: Release
 
-# 自动为 ShellX 构建三平台安装包，打 tag 时汇总成 GitHub Release 并挂上应用内更新清单。
+# 自动为 OneCRT 构建三平台安装包，打 tag 时汇总成 GitHub Release 并挂上应用内更新清单。
 # 骨架照搬 BangHe 的 .github/workflows/release.yml：meta 解析版本 → 各平台 job 构建上传
 # → tag 触发时汇总发布。BangHe 特有的两块没搬：Gitee 国内镜像（那是磅房机无外网的场景）、
 # Microsoft Store 变体（商店上架流程），要加再照着补。
@@ -31,12 +31,12 @@ name: Release
 #     所以清单里仍给 darwin 槽留位（将来接公证不用改工作流），但正文里写明了这一点。
 #
 # 产物命名（Release 资产名，从 bundler 的默认名规整过来）：
-#   shellx-<ver>-windows-x64-setup.exe(.sig)
-#   shellx-<ver>-linux-x64.deb / shellx-<ver>-linux-x64.AppImage(.sig)
-#   shellx-<ver>-macos-arm64.dmg / shellx-<ver>-macos-arm64.app.tar.gz(.sig)
+#   onecrt-<ver>-windows-x64-setup.exe(.sig)
+#   onecrt-<ver>-linux-x64.deb / onecrt-<ver>-linux-x64.AppImage(.sig)
+#   onecrt-<ver>-macos-arm64.dmg / onecrt-<ver>-macos-arm64.app.tar.gz(.sig)
 #   规整成 ASCII 定名有两个理由：Release 资产链接不带中文/空格免做 URL 编码；
-#   gen_updater_manifest.py 靠文件名后缀认平台（它同时把 bundler 默认的 `shellx_<ver>_amd64`
-#   这类带下划线的写法一并吸收掉）。
+#   gen_updater_manifest.py 靠文件名后缀认平台（bundler 的默认名跟着 productName 走，
+#   现在是 `OneCRT_<ver>_x64-setup.exe` / `onecrt_<ver>_amd64.deb` 这类带下划线的写法，一并吸收掉）。
 #
 # 其他说明：
 #   - macOS 只出 Apple Silicon（macos-latest 是 arm64 runner）。要补 Intel：加一个
@@ -126,17 +126,17 @@ jobs:
           $sig = Get-ChildItem $bundle -Recurse -Filter "*_x64-setup.exe.sig" | Select-Object -First 1
           if (-not $sig) { Write-Error "未找到更新包签名 *_x64-setup.exe.sig——TAURI_SIGNING_PRIVATE_KEY 没配或 createUpdaterArtifacts 没开"; exit 1 }
           New-Item -ItemType Directory -Force release | Out-Null
-          Copy-Item $exe.FullName "release/shellx-$ver-windows-x64-setup.exe"
-          Copy-Item $sig.FullName "release/shellx-$ver-windows-x64-setup.exe.sig"
+          Copy-Item $exe.FullName "release/onecrt-$ver-windows-x64-setup.exe"
+          Copy-Item $sig.FullName "release/onecrt-$ver-windows-x64-setup.exe.sig"
           $mb = [math]::Round($exe.Length / 1MB, 1)
-          "打包完成: shellx-$ver-windows-x64-setup.exe ($mb MB) + 签名"
+          "打包完成: onecrt-$ver-windows-x64-setup.exe ($mb MB) + 签名"
           # 主包应是 MB 量级；哪天回到几百 MB 说明有资产被误打进了安装包
           if ($exe.Length -gt 120MB) { Write-Error "主包体积异常 ($mb MB)"; exit 1 }
 
       - uses: actions/upload-artifact@v4
         with:
-          name: shellx-windows-x64
-          path: release/shellx-*
+          name: onecrt-windows-x64
+          path: release/onecrt-*
           if-no-files-found: error
 
   build-linux:
@@ -190,15 +190,15 @@ jobs:
           for f in "$deb" "$appi" "$sig"; do
             [ -n "$f" ] || { echo "bundle 下缺产物：deb/AppImage/AppImage.sig"; exit 1; }
           done
-          cp "$deb"  "release/shellx-$ver-linux-x64.deb"
-          cp "$appi" "release/shellx-$ver-linux-x64.AppImage"
-          cp "$sig"  "release/shellx-$ver-linux-x64.AppImage.sig"
+          cp "$deb"  "release/onecrt-$ver-linux-x64.deb"
+          cp "$appi" "release/onecrt-$ver-linux-x64.AppImage"
+          cp "$sig"  "release/onecrt-$ver-linux-x64.AppImage.sig"
           du -h release/*
 
       - uses: actions/upload-artifact@v4
         with:
-          name: shellx-linux-x64
-          path: release/shellx-*
+          name: onecrt-linux-x64
+          path: release/onecrt-*
           if-no-files-found: error
 
   build-macos:
@@ -242,15 +242,15 @@ jobs:
           for f in "$tar" "$sig" "$dmg"; do
             [ -n "$f" ] || { echo "bundle 下缺产物：app.tar.gz/app.tar.gz.sig/dmg"; exit 1; }
           done
-          cp "$tar" "release/shellx-$ver-macos-arm64.app.tar.gz"
-          cp "$sig" "release/shellx-$ver-macos-arm64.app.tar.gz.sig"
-          cp "$dmg" "release/shellx-$ver-macos-arm64.dmg"
+          cp "$tar" "release/onecrt-$ver-macos-arm64.app.tar.gz"
+          cp "$sig" "release/onecrt-$ver-macos-arm64.app.tar.gz.sig"
+          cp "$dmg" "release/onecrt-$ver-macos-arm64.dmg"
           du -h release/*
 
       - uses: actions/upload-artifact@v4
         with:
-          name: shellx-macos-arm64
-          path: release/shellx-*
+          name: onecrt-macos-arm64
+          path: release/onecrt-*
           if-no-files-found: error
 
   release:
@@ -267,7 +267,7 @@ jobs:
       - name: 下载构建产物
         uses: actions/download-artifact@v4
         with:
-          pattern: shellx-*
+          pattern: onecrt-*
           path: artifacts
           merge-multiple: true
 
@@ -298,7 +298,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
-          name: ShellX ${{ needs.meta.outputs.version }}
+          name: OneCRT ${{ needs.meta.outputs.version }}
           body_path: release_body.md
           draft: false
           prerelease: false

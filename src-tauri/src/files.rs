@@ -488,7 +488,7 @@ mod tests {
 
     #[tokio::test]
     async fn local_listing_puts_dirs_first() {
-        let root = std::env::temp_dir().join(format!("shellx-fs-{}", std::process::id()));
+        let root = std::env::temp_dir().join(format!("onecrt-fs-{}", std::process::id()));
         let _ = std::fs::remove_dir_all(&root);
         std::fs::create_dir_all(root.join("zdir")).unwrap();
         std::fs::write(root.join("a.txt"), b"hello").unwrap();

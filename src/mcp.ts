@@ -24,7 +24,7 @@ export interface McpStatus {
 /// 粘到 MCP 客户端（Qoder / Claude Desktop / Cursor）里的那段配置
 export function snippet(s: McpStatus): string {
   return JSON.stringify(
-    { mcpServers: { shellx: { type: "http", url: s.url, headers: { Authorization: `Bearer ${s.token}` } } } },
+    { mcpServers: { onecrt: { type: "http", url: s.url, headers: { Authorization: `Bearer ${s.token}` } } } },
     null,
     2,
   );

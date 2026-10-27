@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "shellx",
+  "productName": "OneCRT",
   "version": "0.2.0",
   "identifier": "com.sprin.shellx",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "ShellX",
+        "title": "OneCRT",
         "width": 1280,
         "height": 820,
         "minWidth": 900,

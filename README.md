@@ -1,4 +1,4 @@
-# ShellX
+# OneCRT
 
 跨平台 SSH 客户端，Tauri 2 + Rust（russh）+ React + xterm.js。界面采用 Session Manager / Quick Connect / Command Manager 布局。
 
@@ -12,9 +12,9 @@
 - **标签页右键菜单**：Rename / Reset Name、Reconnect / Disconnect、Close (Ctrl+F4) / Close Disconnected Tabs / Close Other Tabs / Close Tabs to the Right / Close All Tabs、Clone Session、Session Options...。Rename 只改标签显示名，Reset Name 回到会话名；改会话本身用 Session Options。Clone Session 用同一份连接参数另开一个标签页，快速连接型标签（无对应会话节点）的 Session Options 置灰。
 - **Command Manager**：与 Session Manager 共用左侧停靠区，底部两个标签切换。同样是文件夹 + 命令树，支持过滤、新建命令 / 新建文件夹、剪切 / 复制 / 粘贴、删除、重命名、展开 / 折叠全部、属性；双击命令或点工具栏箭头发送到当前终端；右键 "Send Command to" 按作用域发送：All Sessions 广播给所有就绪标签页，Visible Sessions 只发给当前可见的那个。命令的显示名与实际发送文本分开存储，允许多行。
 - **工具栏**：菜单栏下方一行，依次为：新建连接（用活动标签的连接参数打开 Quick Connect，没有活动标签时是空白新建）、切换下一个标签、重新连接 | 复制、粘贴、打印 | 会话选项、键盘映射、端口转发。有活动标签时才可用；打印 / 键盘映射 / 端口转发为置灰占位。视图菜单的"工具栏"控制这一行。
-- **关于对话框**：帮助 → 关于 ShellX… 给出版本、运行平台与数据目录（「打开」直接在文件管理器里定位该目录），四个外链（项目主页 / Releases 与下载 / 提交 issue / 第三方标识声明 NOTICE）与依赖致谢；「复制版本信息」一次拷走版本、平台、数据目录，提 issue 时直接粘。外链与打开目录都交回系统默认应用（`tauri-plugin-opener`）。
+- **关于对话框**：帮助 → 关于 OneCRT… 给出版本、运行平台与数据目录（「打开」直接在文件管理器里定位该目录），四个外链（项目主页 / Releases 与下载 / 提交 issue / 第三方标识声明 NOTICE）与依赖致谢；「复制版本信息」一次拷走版本、平台、数据目录，提 issue 时直接粘。外链与打开目录都交回系统默认应用（`tauri-plugin-opener`）。
 - **认证**：密码、公钥（OpenSSH 私钥，支持 `~` 展开）、键盘交互；失败时回传具体原因。
-- **MCP 服务**：文件 → MCP 服务… 打开设置弹窗，勾选后在 `127.0.0.1:39117/mcp`（端口可改）起一个 Streamable HTTP 的 MCP server，把已存会话作为工具开放给外部智能体（Qoder / Claude Desktop / Cursor），弹窗里的复制按钮给出可直接粘进客户端的 `{ mcpServers: { shellx: … } }` JSON。工具六个：`sessions_list`、`terminals_list`、`exec`、`send`、`read`、`close`。`exec` 按会话复用同一个 shell，`cd`、`export` 跨调用有效；命令是否跑完由追加的 `echo` 结束标记判定，回传正文带退出码，输出单次上限 64 KB，超出部分给出续读偏移。默认关闭、只监听回环、每个请求校验 `Authorization: Bearer <token>`；智能体只能点用 shellx 已存的凭据，既收不到也看不到口令本身。弹窗两秒刷新一次，列出当前在跑的 agent 会话与它们最后一条命令。
+- **MCP 服务**：文件 → MCP 服务… 打开设置弹窗，勾选后在 `127.0.0.1:39117/mcp`（端口可改）起一个 Streamable HTTP 的 MCP server，把已存会话作为工具开放给外部智能体（Qoder / Claude Desktop / Cursor），弹窗里的复制按钮给出可直接粘进客户端的 `{ mcpServers: { onecrt: … } }` JSON。工具六个：`sessions_list`、`terminals_list`、`exec`、`send`、`read`、`close`。`exec` 按会话复用同一个 shell，`cd`、`export` 跨调用有效；命令是否跑完由追加的 `echo` 结束标记判定，回传正文带退出码，输出单次上限 64 KB，超出部分给出续读偏移。默认关闭、只监听回环、每个请求校验 `Authorization: Bearer <token>`；智能体只能点用 OneCRT 已存的凭据，既收不到也看不到口令本身。弹窗两秒刷新一次，列出当前在跑的 agent 会话与它们最后一条命令。
 
 ## 开发
 
@@ -65,6 +65,8 @@ cd src-tauri && cargo test
 ## 数据位置
 
 会话与命令保存在 `dirs::config_dir()/shellx/`（Windows：`%APPDATA%\shellx\`）下的 `sessions.json`、`commands.json`。MCP 服务的开关、端口与令牌在同目录的 `mcp.json`，令牌明文存放；改端口会重启监听，重新生成令牌不会（鉴权逐请求现读，客户端下次请求就用新值，旧令牌当场失效）。口令在 Windows 上经 DPAPI 加密后落盘（存成 `dpapi:` 前缀的十六进制，密钥由当前登录用户持有），私钥路径明文；Linux 与 macOS 没有可移植的系统级密钥，口令明文存放。仅面向内网运维场景，请勿用于对外分发的机器。
+
+产品名叫 OneCRT（仓库 `onecrt`），但三处历史标识按原名保留：应用标识 `com.sprin.shellx`、上面那个数据目录、以及 `localStorage` 里的 `shellx.*` 键（主题、布局、停靠记忆）。它们都是已装客户端正在用的持久化位置，改了等于把老用户的会话和界面状态原地清空，所以不跟随改名。
 
 ## 已知取舍
 

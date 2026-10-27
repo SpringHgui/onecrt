@@ -10,14 +10,14 @@ use rmcp::{
         StreamableHttpClientTransport, streamable_http_client::StreamableHttpClientTransportConfig,
     },
 };
-use shellx_lib::{mcp, terminal};
+use onecrt_lib::{mcp, terminal};
 use std::path::PathBuf;
 
 const TOKEN: &str = "test-token-0123456789abcdef";
 
 fn temp_cfg_path(case: &str) -> PathBuf {
     let mut p = std::env::temp_dir();
-    p.push(format!("shellx-mcp-{case}-{}.json", std::process::id()));
+    p.push(format!("onecrt-mcp-{case}-{}.json", std::process::id()));
     p
 }
 
@@ -55,7 +55,7 @@ fn transport(url: &str, token: &str) -> StreamableHttpClientTransport<reqwest::C
 async fn handshake(url: &str, token: &str) -> Result<String, Box<dyn std::error::Error>> {
     let client = ClientConfig::new(
         ClientCapabilities::default(),
-        Implementation::new("shellx-test", env!("CARGO_PKG_VERSION")),
+        Implementation::new("onecrt-test", env!("CARGO_PKG_VERSION")),
     )
     .serve_with_lifecycle(
         transport(url, token),
@@ -96,11 +96,11 @@ async fn wrong_token_cannot_complete_handshake() {
 /// 握手 → 列工具 → 调一个不落盘的工具
 async fn tools_flow(url: &str) {
     let name = handshake(url, TOKEN).await.expect("带 token 应连上");
-    assert_eq!(name, "shellx", "握手回来的服务名");
+    assert_eq!(name, "onecrt", "握手回来的服务名");
 
     let client = ClientConfig::new(
         ClientCapabilities::default(),
-        Implementation::new("shellx-test", env!("CARGO_PKG_VERSION")),
+        Implementation::new("onecrt-test", env!("CARGO_PKG_VERSION")),
     )
     .serve_with_lifecycle(
         transport(url, TOKEN),
@@ -158,7 +158,7 @@ async fn rotate_token_keeps_the_service_up() {
 
     let err = handshake(&url, TOKEN).await.expect_err("旧令牌不该还能连");
     assert!(format!("{err:?}").contains("401"), "旧令牌应被拦在 401: {err:?}");
-    assert_eq!(handshake(&url, &st.token).await.expect("新令牌应连上"), "shellx");
+    assert_eq!(handshake(&url, &st.token).await.expect("新令牌应连上"), "onecrt");
 
     mcp::set_enabled(&state, false).await.expect("关掉");
 }
@@ -175,7 +175,7 @@ async fn reapplying_the_same_port_rebinds() {
     tokio::time::sleep(std::time::Duration::from_millis(200)).await;
     let st = mcp::status(&state).await;
     assert!(st.running, "200ms 后仍应监听，error={:?}", st.error);
-    assert_eq!(handshake(&url, TOKEN).await.expect("重绑后仍能握手"), "shellx");
+    assert_eq!(handshake(&url, TOKEN).await.expect("重绑后仍能握手"), "onecrt");
     mcp::set_enabled(&state, false).await.expect("关掉");
 }
 

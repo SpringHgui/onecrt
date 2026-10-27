@@ -49,10 +49,10 @@ const zh: Dict = {
   "menu.view.alwaysOnTop": "总在最前",
   "menu.view.language": "语言",
   "menu.help": "帮助",
-  "menu.help.about": "关于 ShellX…",
+  "menu.help.about": "关于 OneCRT…",
 
   // 关于
-  "about.title": "关于 ShellX",
+  "about.title": "关于 OneCRT",
   "about.desc": "跨平台 SSH 客户端：会话管理、快速连接、命令库，外加一个给智能体用的 MCP 服务。",
   "about.note": "会话与命令保存在下面的数据目录；Windows 上口令经 DPAPI 加密后落盘，Linux 与 macOS 为明文。仅面向内网运维，请勿用于对外分发的机器。",
   "about.link.home": "项目主页",
@@ -394,9 +394,9 @@ const en: Dict = {
   "menu.view.alwaysOnTop": "Always On Top",
   "menu.view.language": "Language",
   "menu.help": "Help",
-  "menu.help.about": "About ShellX…",
+  "menu.help.about": "About OneCRT…",
 
-  "about.title": "About ShellX",
+  "about.title": "About OneCRT",
   "about.desc": "Cross-platform SSH client: session manager, quick connect, command library, plus an MCP server for agents.",
   "about.note": "Sessions and commands live in the data directory below. Passwords are DPAPI-encrypted on Windows and plaintext on Linux and macOS. Meant for intranet operations, not for machines you distribute.",
   "about.link.home": "Project home",

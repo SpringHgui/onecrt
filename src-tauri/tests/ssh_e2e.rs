@@ -2,8 +2,8 @@
 use russh::keys::PrivateKey;
 use russh::server::{Msg, Session as ServerSession};
 use russh::{ChannelId, Pty};
-use shellx_lib::terminal::{self, OpenArgs, Shared};
-use shellx_lib::stats;
+use onecrt_lib::terminal::{self, OpenArgs, Shared};
+use onecrt_lib::stats;
 use std::pin::Pin;
 use std::sync::{Arc, Mutex};
 use tauri::ipc::{Channel, InvokeResponseBody};

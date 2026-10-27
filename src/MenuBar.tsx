@@ -135,7 +135,7 @@ export function useMenuShortcuts(h: ShortcutHandlers) {
   }, []);
 }
 
-/// 仓库地址：本地目录叫 shellx，远端是 onecrt，关于页的链接一律按远端写
+/// 仓库地址：本地工作副本的目录名与远端不同，关于页的链接一律按远端写
 const REPO = "https://github.com/SpringHgui/onecrt";
 
 /// 关于页的外链。openUrl 由 opener 插件按默认浏览器打开，http/https 已在 opener:default 作用域里
@@ -185,7 +185,7 @@ export function AboutDialog({ onClose }: { onClose(): void }) {
   /// 提 issue 时把环境一次贴走，省得来回问「你什么系统、哪个版本」
   const copyInfo = () => {
     const text = [
-      `ShellX ${version}`,
+      `OneCRT ${version}`,
       envLine,
       info?.dataDir ? `${t("about.dataDir")}: ${info.dataDir}` : "",
     ]
@@ -241,8 +241,8 @@ export function AboutDialog({ onClose }: { onClose(): void }) {
         <div className="dialog-body about-body">
           <div className="about-cols">
             <div className="about-brand">
-              <img className="about-logo" src="/app-icon.svg" alt="ShellX" width={64} height={64} />
-              <div className="about-name">ShellX</div>
+              <img className="about-logo" src="/app-icon.svg" alt="OneCRT" width={64} height={64} />
+              <div className="about-name">OneCRT</div>
               <div className="about-ver">{version || "—"}</div>
               <div className="about-env">{envLine || "—"}</div>
               <div className="about-desc">{t("about.desc")}</div>
