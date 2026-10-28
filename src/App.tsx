@@ -58,6 +58,13 @@ import QuickConnect, { ConnectParams } from "./QuickConnect";
 import PasswordPrompt from "./PasswordPrompt";
 import ConfirmDialog from "./ConfirmDialog";
 import ImportDialog from "./ImportDialog";
+import ImportConflictDialog from "./ImportConflictDialog";
+import {
+  ConflictEntry,
+  applyAppend,
+  applyOverwrite,
+  planImport,
+} from "./importMerge";
 import McpDialog from "./McpDialog";
 import CommandManager from "./CommandManager";
 import FilePanel from "./FilePanel";
@@ -421,6 +428,13 @@ export default function App() {
   const [quickConnect, setQuickConnect] = useState<null | { edit?: SshSession; prefill?: Partial<ConnectParams> }>(null);
   const [pwdPrompt, setPwdPrompt] = useState<{ session: SshSession; reconnectTabId?: string } | null>(null);
   const [confirmBox, setConfirmBox] = useState<{ message: string; action: () => void } | null>(null);
+  /// 导入冲突时的三选状态：新增部分 + 冲突清单 + 冲突时归并到既有树要用的 toAppend
+  const [importConflict, setImportConflict] = useState<{
+    newCount: number;
+    conflictCount: number;
+    toAppend: Node[];
+    conflicts: ConflictEntry[];
+  } | null>(null);
   const [importBox, setImportBox] = useState(false);
   const [mcpBox, setMcpBox] = useState(false);
   const [cmdTree, setCmdTree] = useState<CommandNode[]>([]);
@@ -687,7 +701,9 @@ export default function App() {
 
   const addFolder = () => startNewFolder("sessions");
 
-  /// 文件 → 导入外部客户端配置：后端弹框选文件并解析，前端补 id 后追加到当前树
+  /// 文件 → 导入外部客户端配置：后端弹框选文件并解析，前端补 id 后按 1A/2A/3A 并入当前树。
+  /// 无冲突时直接落地；有冲突时弹一次三选（只新增 / 新增并覆盖口令 / 取消），交由用户决定，
+  /// 不做静默覆盖——SecureCRT 的口令现已能自动解出，用户手改过的口令只有他明确同意才回退。
   const importSessions = async (cmd: "import_securecrt" | "import_winscp") => {
     let imported: Node[] | null;
     try {
@@ -705,22 +721,35 @@ export default function App() {
           ? { ...n, id: newId("f"), children: assign(n.children) }
           : { ...n, id: newId("s") },
       );
-    const count = (nodes: Node[]): number =>
-      nodes.reduce((acc, n) => acc + (isFolder(n) ? count(n.children) : 1), 0);
-
     const withIds = assign(imported);
-    const n = count(withIds);
-    if (n === 0) {
+    const plan = planImport(treeRef.current, withIds);
+    if (plan.newCount + plan.conflictCount === 0) {
       setConfirmBox({ message: t("sm.importNone"), action: () => {} });
       return;
     }
-    persistTree([...treeRef.current, ...withIds]);
-    setExpanded((s) => {
-      const next = new Set(s);
-      collectFolderIds(withIds, next);
-      return next;
+    if (plan.conflictCount === 0) {
+      commitImport(plan.toAppend, []);
+      setConfirmBox({ message: t("sm.imported", { n: plan.newCount }), action: () => {} });
+      return;
+    }
+    setImportConflict({
+      newCount: plan.newCount,
+      conflictCount: plan.conflictCount,
+      toAppend: plan.toAppend,
+      conflicts: plan.conflicts,
     });
-    setConfirmBox({ message: t("sm.imported", { n }), action: () => {} });
+  };
+
+  /// 3A 文件夹归并后追加；有 conflicts 时同时按 2A 只覆盖 password（imported 侧空则不改）。
+  const commitImport = (toAppend: Node[], conflicts: ConflictEntry[]) => {
+    let next = applyAppend(treeRef.current, toAppend);
+    if (conflicts.length > 0) next = applyOverwrite(next, conflicts);
+    persistTree(next);
+    setExpanded((s) => {
+      const n = new Set(s);
+      collectFolderIds(toAppend, n);
+      return n;
+    });
   };
 
   const deleteNode = (node: Node) => {
@@ -2067,6 +2096,33 @@ export default function App() {
             const action = confirmBox.action;
             setConfirmBox(null);
             action();
+          }}
+        />
+      )}
+
+      {importConflict && (
+        <ImportConflictDialog
+          newCount={importConflict.newCount}
+          conflictCount={importConflict.conflictCount}
+          onCancel={() => setImportConflict(null)}
+          onAppendOnly={() => {
+            const { toAppend, newCount, conflictCount } = importConflict;
+            setImportConflict(null);
+            commitImport(toAppend, []);
+            setConfirmBox({
+              message: t("sm.importedSkip", { n: newCount, m: conflictCount }),
+              action: () => {},
+            });
+          }}
+          onOverwrite={() => {
+            const { toAppend, conflicts, newCount } = importConflict;
+            const refreshed = conflicts.reduce((acc, c) => acc + (c.newPassword ? 1 : 0), 0);
+            setImportConflict(null);
+            commitImport(toAppend, conflicts);
+            setConfirmBox({
+              message: t("sm.importedOverwrite", { n: newCount, m: refreshed }),
+              action: () => {},
+            });
           }}
         />
       )}
