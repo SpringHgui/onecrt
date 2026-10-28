@@ -1,6 +1,6 @@
 [package]
 name = "onecrt"
-version = "0.2.0"
+version = "0.2.1"
 description = "OneCRT - a cross-platform SSH2 terminal client"
 authors = ["you"]
 edition = "2021"
