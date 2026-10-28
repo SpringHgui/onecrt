@@ -5,11 +5,56 @@
 //!
 //! WinSCP 把会话存成 INI 段落 `[Sessions\组/会话名]`，段名里的 `/` 是分组层级。
 //!
-//! 两者导出的配置都没有可用的明文口令（SecureCRT 压根不导出，WinSCP 存的是自家
-//! 混淆密文），所以口令一律留空——连接时会弹框补凭据，与手动新建会话的行为一致。
+//! SecureCRT 的 `Password V2`（`02:` 前缀）是可离线还原的 AES-256-CBC 密文，导入时自动
+//! 解密填回口令；未设主口令的导出（本工具的常见场景）能直接解出，设了主口令的解不开则
+//! 留空、连接时弹框补。WinSCP 存的是绑定机器/用户的自家混淆密文，不可移植，口令一律留空。
 
 use crate::sessions::{default_auth, Node, SshSession};
+use cbc::cipher::{block_padding::NoPadding, BlockDecryptMut, KeyIvInit};
 use roxmltree::Node as XNode;
+use sha2::{Digest, Sha256};
+
+/// SecureCRT `Password V2` 的 `02:` 前缀 = AES-256-CBC：key=`SHA256(主口令)`、IV=16 字节全 0，
+/// 明文 = `u32_le(口令长度) ‖ 口令 ‖ SHA256(口令) ‖ 随机填充`。
+///
+/// 只在**未设主口令**的导出上自动解（key 取 `SHA256("")`），并靠内嵌的 `SHA256(口令)` 校验和
+/// 自证正确性——校验不过（设了主口令、密文损坏、非 `02:` 格式、口令非 UTF-8）一律判为解不出，
+/// 返回 `None`，让上层留空、连接时补凭据。不尝试暴力还原主口令：那本就是 SecureCRT 的安全边界。
+fn decrypt_securecrt_v2(blob: &str) -> Option<String> {
+    let hex = blob.strip_prefix("02:")?;
+    let ct = unhex(hex)?;
+    // AES-CBC 密文须是 16 字节块的整数倍，且至少容得下 4 字节长度 + 32 字节校验和
+    if ct.is_empty() || ct.len() % 16 != 0 || ct.len() < 4 + 32 {
+        return None;
+    }
+    let key = Sha256::digest(b"");
+    let iv = [0u8; 16];
+    let pt = cbc::Decryptor::<aes::Aes256>::new_from_slices(&key, &iv)
+        .ok()?
+        .decrypt_padded_vec_mut::<NoPadding>(&ct)
+        .ok()?;
+    let len = u32::from_le_bytes([pt[0], pt[1], pt[2], pt[3]]) as usize;
+    if 4 + len + 32 > pt.len() {
+        return None;
+    }
+    let password = &pt[4..4 + len];
+    let checksum = &pt[4 + len..4 + len + 32];
+    let want = Sha256::digest(password);
+    if &want[..] != checksum {
+        return None;
+    }
+    String::from_utf8(password.to_vec()).ok()
+}
+
+/// 把小写十六进制串解成字节；长度为奇数或含非十六进制字符时返回 None
+fn unhex(s: &str) -> Option<Vec<u8>> {
+    if s.len() % 2 != 0 {
+        return None;
+    }
+    (0..s.len() / 2)
+        .map(|i| u8::from_str_radix(&s[i * 2..i * 2 + 2], 16).ok())
+        .collect()
+}
 
 /// 取直接子级里 `<string name="...">` 的文本
 fn child_string<'a>(node: XNode<'a, '_>, name: &str) -> Option<String> {
@@ -36,6 +81,10 @@ fn convert(node: XNode, out: &mut Vec<Node>) {
         let host = child_string(child, "Hostname").unwrap_or_default();
         if !host.is_empty() {
             let port = child_dword(child, "[SSH2] Port").unwrap_or(22).clamp(1, 65535) as u16;
+            // `Password V2` 能离线解出来就自动填（未设主口令的常见情形），解不出留空。
+            let password = child_string(child, "Password V2")
+                .and_then(|b| decrypt_securecrt_v2(&b))
+                .unwrap_or_default();
             out.push(Node::Session(SshSession {
                 // id 留空，由前端合并进树时统一分配，避免和现有会话撞号
                 id: String::new(),
@@ -43,7 +92,7 @@ fn convert(node: XNode, out: &mut Vec<Node>) {
                 host,
                 port,
                 username: child_string(child, "Username").unwrap_or_default(),
-                password: String::new(),
+                password,
                 key_path: child_string(child, "Identity Filename V2").unwrap_or_default(),
                 auth: default_auth(),
             }));
@@ -229,6 +278,7 @@ mod tests {
         <dword name="[SSH2] Port">2222</dword>
         <string name="Hostname">10.0.0.1</string>
         <string name="Username">root</string>
+        <string name="Password V2">02:99924fd04a343830c36f14bbe332fb112f9d62cf8a71fcefb76040eb2290d8cb9b9641bd7dddde0d6214f716ddd51d85693eb37a644903117c4f9fbafec247d9</string>
         <string name="Protocol Name">SSH2</string>
         <string name="Identity Filename V2"/>
       </key>
@@ -275,19 +325,44 @@ mod tests {
     }
 
     #[test]
-    fn 口令一律留空_id留空待前端分配() {
+    fn 有效口令被解密_无口令留空_id一律留空() {
         let nodes = parse_securecrt(SAMPLE).unwrap();
-        let mut ids = vec![];
-        fn walk(nodes: &[Node], ids: &mut Vec<(String, String)>) {
+        let mut pairs = vec![];
+        fn walk(nodes: &[Node], pairs: &mut Vec<(String, String)>) {
             for n in nodes {
                 match n {
-                    Node::Folder { id, children, .. } => { ids.push((id.clone(), String::new())); walk(children, ids); }
-                    Node::Session(s) => ids.push((s.id.clone(), s.password.clone())),
+                    Node::Folder { id, children, .. } => { pairs.push((id.clone(), String::new())); walk(children, pairs); }
+                    Node::Session(s) => pairs.push((s.id.clone(), s.password.clone())),
                 }
             }
         }
-        walk(&nodes, &mut ids);
-        assert!(ids.iter().all(|(id, pwd)| id.is_empty() && pwd.is_empty()));
+        walk(&nodes, &mut pairs);
+        // id 一律留空，交前端合并时统一分配，避免与现有会话撞号
+        assert!(pairs.iter().all(|(id, _)| id.is_empty()));
+        // web 有合法 `02:` 密文 → 解出真实口令（未设主口令，SHA256 自校验通过）
+        let web = match &nodes[0] { Node::Folder { children, .. } => &children[0], _ => unreachable!() };
+        assert!(matches!(web, Node::Session(s) if s.password == "bx36@JBN"));
+        // db 无 Password V2 → 留空，连接时弹框补
+        let db = match &nodes[0] { Node::Folder { children, .. } => &children[1], _ => unreachable!() };
+        assert!(matches!(db, Node::Session(s) if s.password.is_empty()));
+    }
+
+    #[test]
+    fn v2解密_正确_非前缀_过短_篡改_均按解不出处理() {
+        // 真实样例：02: 前缀、未设主口令 → bx36@JBN
+        let good = "02:99924fd04a343830c36f14bbe332fb112f9d62cf8a71fcefb76040eb2290d8cb9b9641bd7dddde0d6214f716ddd51d85693eb37a644903117c4f9fbafec247d9";
+        assert_eq!(decrypt_securecrt_v2(good).as_deref(), Some("bx36@JBN"));
+        // 缺 02: 前缀 / 空 / 非十六进制 / 过短 → None
+        assert_eq!(decrypt_securecrt_v2("99924fd0"), None);
+        assert_eq!(decrypt_securecrt_v2(""), None);
+        assert_eq!(decrypt_securecrt_v2("02:zz"), None);
+        assert_eq!(decrypt_securecrt_v2("02:00112233"), None); // 8 字节 < 4+32
+        // 篡改首个密文块的高 4 位：CBC 下会破坏首个明文块（长度/口令/校验和区），
+        // 内嵌 SHA256 校验和随即不匹配 → None。（注意：尾部随机填充不受校验，改它口令仍能解出。）
+        let mut t: Vec<char> = good.chars().collect();
+        t[3] = if t[3] == '8' { '9' } else { '8' };
+        let tampered: String = t.into_iter().collect();
+        assert_eq!(decrypt_securecrt_v2(&tampered), None);
     }
 
     #[test]

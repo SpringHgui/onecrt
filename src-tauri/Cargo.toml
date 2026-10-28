@@ -34,6 +34,12 @@ roxmltree = "0.20"
 tauri-plugin-updater = "2"
 tauri-plugin-process = "2"
 
+# 导入 SecureCRT 时解密 `Password V2`（`02:` = AES-256-CBC + SHA256 口令派生）。
+# 用 RustCrypto 家族而非 ring：ring 出于合规刻意不暴露 AES-CBC 原语。纯 Rust，三平台可编。
+aes = "0.8"
+cbc = { version = "0.1", features = ["std"] }
+sha2 = "0.10"
+
 # MCP 服务：把已存会话开成 Streamable HTTP 的 MCP server，只监听回环。
 # rmcp 默认带 server + macros；服务端传输要自己开。
 rmcp = { version = "3.7", features = ["transport-streamable-http-server"] }
