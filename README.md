@@ -2,7 +2,7 @@
   <img src="public/app-icon.png" width="128" height="128" alt="OneCRT">
 
   # OneCRT
-  ### 跨平台 SSH2 终端客户端
+  ### 跨平台 ssh终端
 
   <img src="site/assets/shot-terminal-dark.png" width="880" alt="深色主题主界面：左侧会话管理器按生产 / 预发分组，web-01 已选中；中间 web-01 终端标签页里跑 kubectl、df、systemctl；状态栏显示 root@203.0.113.11:22 已连接"><br>
   <sub>会话树 + 终端标签页</sub><br><br>
