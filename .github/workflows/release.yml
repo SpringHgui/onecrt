@@ -1,15 +1,15 @@
 name: Release
 
-# 打 tag `v*` 时为三平台出便携包并建 GitHub Release；
+# 打 tag `v*` 时为三平台出安装包并建 GitHub Release；
 # 手动 workflow_dispatch 只构建并上传 workflow artifacts，不建 Release。
 #
 # 版本号唯一数据源是 rust/Cargo.toml 的 [workspace.package] version，
 # meta job 会校验 tag 与它一致。
 #
-# 产物（都是免安装的压缩包，解开就能跑）：
-#   onecrt-<ver>-windows-x64.zip        onecrt.exe
-#   onecrt-<ver>-linux-x64.tar.gz       onecrt（需要系统装好 Wayland/X11 与字体配置）
-#   onecrt-<ver>-macos-arm64.zip        OneCRT.app（未签名，首启要过 Gatekeeper）
+# 产物：
+#   onecrt-<ver>-windows-x64-setup.exe    Inno Setup 安装包
+#   onecrt-<ver>-linux-x64.deb            Debian 安装包
+#   onecrt-<ver>-macos-arm64.dmg          macOS DMG 安装包
 #   SHA256SUMS.txt
 #
 # 未做代码签名（Windows 无证书、macOS 无公证），首启会遇 SmartScreen / Gatekeeper 提示。
@@ -51,7 +51,7 @@ jobs:
           echo "版本号: $v"
 
   build-windows:
-    name: Windows x64
+    name: Windows x64 安装包
     needs: meta
     runs-on: windows-latest
     defaults:
@@ -69,24 +69,41 @@ jobs:
       - name: 构建
         run: cargo build --release -p onecrt
 
-      - name: 打包
+      - name: 准备安装包文件
+        shell: pwsh
+        run: |
+          $stage = "target/installer/stage"
+          New-Item -ItemType Directory -Force $stage | Out-Null
+          Copy-Item target/release/onecrt.exe $stage
+          $crt = "$env:SystemRoot\System32\vcruntime140.dll"
+          if (Test-Path $crt) { Copy-Item $crt $stage }
+
+      - name: 安装 Inno Setup
+        shell: pwsh
+        run: |
+          $url = "https://jrsoftware.org/download.php/is.exe"
+          $installer = "$env:TEMP\innosetup.exe"
+          Invoke-WebRequest -Uri $url -OutFile $installer
+          Start-Process -FilePath $installer -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART" -Wait
+          Remove-Item $installer
+
+      - name: 生成安装包
         shell: pwsh
         run: |
           $ver = "${{ needs.meta.outputs.version }}"
-          New-Item -ItemType Directory -Force ../release | Out-Null
-          Copy-Item target/release/onecrt.exe ../release/onecrt.exe
-          Compress-Archive -Path ../release/onecrt.exe -DestinationPath "../release/onecrt-$ver-windows-x64.zip"
-          Remove-Item ../release/onecrt.exe
-          Get-Item "../release/onecrt-$ver-windows-x64.zip" | Select-Object Name, Length
+          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
+          $stage = (Resolve-Path "target/installer/stage").Path
+          & $iscc "/DMyAppVersion=$ver" "/DStageDir=$stage" "installer/onecrt.iss"
+          Get-ChildItem target/installer -Filter '*.exe' | Select-Object Name, Length
 
       - uses: actions/upload-artifact@v4
         with:
-          name: onecrt-windows-x64
-          path: release/onecrt-*
+          name: onecrt-windows-x64-setup
+          path: rust/target/installer/*.exe
           if-no-files-found: error
 
   build-linux:
-    name: Linux x64
+    name: Linux x64 安装包
     needs: meta
     runs-on: ubuntu-latest
     defaults:
@@ -113,22 +130,57 @@ jobs:
       - name: 构建
         run: cargo build --release -p onecrt
 
-      - name: 打包
+      - name: 打包 DEB
         run: |
           set -euo pipefail
           ver="${{ needs.meta.outputs.version }}"
+          pkg="onecrt_$ver-1_amd64"
+          rm -rf "$pkg" ../release
+          mkdir -p "$pkg/DEBIAN" "$pkg/usr/bin" "$pkg/usr/share/applications" "$pkg/usr/share/icons/hicolor/256x256/apps"
+          
+          cat > "$pkg/DEBIAN/control" <<EOF
+          Package: onecrt
+          Version: $ver-1
+          Section: utils
+          Priority: optional
+          Architecture: amd64
+          Maintainer: SpringHgui <gui.h@example.com>
+          Homepage: https://github.com/SpringHgui/onecrt
+          Description: OneCRT - Cross-platform SSH terminal
+           Pure Rust implementation of a cross-platform SSH terminal with SFTP support.
+          EOF
+          
+          cp target/release/onecrt "$pkg/usr/bin/"
+          chmod 755 "$pkg/usr/bin/onecrt"
+          
+          cat > "$pkg/usr/share/applications/onecrt.desktop" <<EOF
+          [Desktop Entry]
+          Name=OneCRT
+          Comment=SSH Terminal
+          Exec=onecrt
+          Icon=onecrt
+          Terminal=false
+          Type=Application
+          Categories=System;TerminalEmulator;
+          EOF
+          
+          if [ -f onecrt/assets/logo.png ]; then
+            cp onecrt/assets/logo.png "$pkg/usr/share/icons/hicolor/256x256/apps/onecrt.png"
+          fi
+          
+          dpkg-deb --build "$pkg"
           mkdir -p ../release
-          tar -czf "../release/onecrt-$ver-linux-x64.tar.gz" -C target/release onecrt
-          du -h ../release/*
+          mv "$pkg.deb" "../release/onecrt-$ver-linux-x64.deb"
+          ls -lh ../release/
 
       - uses: actions/upload-artifact@v4
         with:
-          name: onecrt-linux-x64
-          path: release/onecrt-*
+          name: onecrt-linux-x64-deb
+          path: release/*.deb
           if-no-files-found: error
 
   build-macos:
-    name: macOS Apple Silicon
+    name: macOS Apple Silicon 安装包
     needs: meta
     runs-on: macos-latest
     defaults:
@@ -151,8 +203,8 @@ jobs:
           set -euo pipefail
           ver="${{ needs.meta.outputs.version }}"
           app="OneCRT.app"
-          rm -rf "$app" ../release
-          mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources" ../release
+          rm -rf "$app"
+          mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
           cp target/release/onecrt "$app/Contents/MacOS/OneCRT"
           cp onecrt/assets/icon.icns "$app/Contents/Resources/icon.icns"
           cat > "$app/Contents/Info.plist" <<EOF
@@ -173,13 +225,22 @@ jobs:
           </dict>
           </plist>
           EOF
-          zip -qry "../release/onecrt-$ver-macos-arm64.zip" "$app"
-          du -h ../release/*
+
+      - name: 生成 DMG
+        run: |
+          set -euo pipefail
+          ver="${{ needs.meta.outputs.version }}"
+          dmg="onecrt-$ver-macos-arm64.dmg"
+          rm -f "$dmg"
+          hdiutil create -volname "OneCRT" -srcfolder "OneCRT.app" -ov -format UDZO "$dmg"
+          ls -lh "$dmg"
+          mkdir -p ../release
+          mv "$dmg" ../release/
 
       - uses: actions/upload-artifact@v4
         with:
-          name: onecrt-macos-arm64
-          path: release/onecrt-*
+          name: onecrt-macos-arm64-dmg
+          path: release/*.dmg
           if-no-files-found: error
 
   release:
@@ -207,15 +268,15 @@ jobs:
           tag_name: ${{ github.ref_name }}
           name: OneCRT ${{ needs.meta.outputs.version }}
           body: |
-            OneCRT ${{ needs.meta.outputs.version }}（纯 Rust / gpui 重写版）三平台便携包：
+            OneCRT ${{ needs.meta.outputs.version }}（纯 Rust / gpui 重写版）三平台安装包：
 
-            | 平台 | 文件 |
-            | --- | --- |
-            | Windows x64 | `onecrt-${{ needs.meta.outputs.version }}-windows-x64.zip` |
-            | Linux x64 | `onecrt-${{ needs.meta.outputs.version }}-linux-x64.tar.gz` |
-            | macOS arm64 | `onecrt-${{ needs.meta.outputs.version }}-macos-arm64.zip` |
+            | 平台 | 文件 | 说明 |
+            | --- | --- | --- |
+            | Windows x64 | `onecrt-${{ needs.meta.outputs.version }}-windows-x64-setup.exe` | Inno Setup 安装包 |
+            | Linux x64 | `onecrt-${{ needs.meta.outputs.version }}-linux-x64.deb` | Debian 包，`sudo dpkg -i` 安装 |
+            | macOS arm64 | `onecrt-${{ needs.meta.outputs.version }}-macos-arm64.dmg` | 双击挂载拖入 Applications |
 
-            解压即用，未做代码签名（首启有 SmartScreen / Gatekeeper 提示）。
+            未做代码签名（首启有 SmartScreen / Gatekeeper 提示）。
             应用内「关于 → 检查更新」只提示新版本并打开本页，不自动安装。
           generate_release_notes: true
           files: artifacts/*
