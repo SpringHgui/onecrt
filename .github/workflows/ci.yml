@@ -10,7 +10,7 @@ name: CI
 
 on:
   push:
-    branches: [master]
+    branches: [master, rust]
   pull_request:
 
 permissions:
