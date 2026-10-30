@@ -1,16 +1,9 @@
 # NOTICE
 
-## 第三方产品标识
+## 第三方产品名称
 
-`public/brand/` 下的图片是各产品的**官方标识原件**，未做几何或配色改动，只等比放入应用内的统一瓦片。
-用途仅限于标识"OneCRT 可以导入哪种工具导出的配置"，不代表任何厂商对项目的认可或授权。
-相关商标、著作权归各自权利人所有。
+OneCRT 的导入功能支持读取 SecureCRT 与 WinSCP 导出的配置文件。相关名称仅用于说明兼容的配置格式，
+不代表任何厂商对项目的认可或授权；商标与著作权归各自权利人所有（SecureCRT 属 VanDyke Software, Inc.，
+WinSCP 属其作者与项目）。应用内不再分发这些产品的图形标识。
 
-| 文件 | 产品 | 权利人 | 来源 | 取用日期 |
-| --- | --- | --- | --- | --- |
-| `public/brand/securecrt.png` | SecureCRT | VanDyke Software, Inc. | <https://www.vandyke.com/images/assets/product-securecrt.png> | 2026-10-26 |
-| `public/brand/winscp.png` | WinSCP | Martin Přikryl（WinSCP） | <https://winscp.net/> 静态资源 `assets/images/logos/logo@3x.png` | 2026-10-26 |
-
-WinSCP 程序本身以 GPL-3.0 发布，但该许可证不覆盖其名称与图形标识；上述 logo 按商标对待。
-
-如权利人要求移除，请提 issue，我们会在下个版本删掉对应文件并改为纯文字来源名。
+如权利人要求调整措辞或移除相关名称，请提 issue，我们会在下个版本处理。

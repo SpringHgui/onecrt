@@ -1,0 +1,14 @@
+[workspace]
+resolver = "2"
+members = ["onecrt-core", "onecrt"]
+
+[workspace.package]
+version = "0.3.0"
+edition = "2021"
+authors = ["you"]
+
+[profile.release]
+codegen-units = 1
+lto = true
+opt-level = 3
+strip = true

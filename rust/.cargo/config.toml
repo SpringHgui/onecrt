@@ -1,0 +1,7 @@
+# 本仓库专用镜像：直连 static.crates.io 拉大 crate（gpui 等）会长时间卡在几 KB/s。
+# rsproxy 是 crates.io 的只读镜像，包内容与校验和一致。
+[source.crates-io]
+replace-with = "rsproxy-sparse"
+
+[source.rsproxy-sparse]
+registry = "sparse+https://rsproxy.cn/index/"

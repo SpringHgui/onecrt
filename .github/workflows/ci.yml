@@ -1,21 +1,12 @@
 name: CI
 
-# 每次 push / PR 跑轻量检查，不做安装包（那归 release.yml）。
+# 每次 push / PR 做格式、编译与单测检查；安装包归 release.yml。
 #
-# 两道门，跑在 ubuntu（比 windows runner 快、免并发额度）：
-#   1. frontend：npm ci → tsc --noEmit → vite build → i18n 词典核对；
-#   2. backend：cargo check --all-targets + cargo test。
-#
-# 说明：
-#   - vite build 与 tauri build 的 beforeBuildCommand 同路径，能抓到 tsc 看不见的
-#     模块解析问题（拼错的 import 路径、缺依赖）。
-#   - scripts/i18n/check.mjs 核对 zh/en 两份词典键一一对应，以及面板页签名确实取自词典：
-#     加文案只写一种语言是这里最容易漏的回归。
-#   - cargo 侧要装 Tauri 在 Linux 下的 pkg-config 依赖（libwebkit2gtk 等），因为
-#     tauri::generate_context! 会读 tauri.conf.json，而它引用的 ../dist 在 CI 全新检出里
-#     不存在（已 gitignore），垫一个占位 index.html。
-#   - src-tauri/tests/ssh_e2e.rs 是进程内起 russh 服务端驱动真实客户端代码，不碰外网，
-#     所以 CI 上可直接跑，不必跳测试。
+# 矩阵跑 ubuntu 与 windows：
+#   - ubuntu 负责格式检查（rustfmt 只在一边跑，避免两边对同一份 diff 报两次）与
+#     Linux 上的可移植性（gpui 在 Linux 走 Wayland/X11 分支，编译路径和 Windows 不同）；
+#   - windows 是发布主平台，保证干净克隆里也能编过。
+#   - macOS 只在 release.yml 里构建，CI 不占 macOS runner 的额度。
 
 on:
   push:
@@ -29,52 +20,49 @@ concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
 
+env:
+  CARGO_TERM_COLOR: always
+
 jobs:
-  frontend:
-    name: 前端构建与文案核对
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-          cache: npm
-      - name: 依赖安装
-        run: npm ci
-      - name: 类型检查
-        run: npx tsc --noEmit --incremental false -p tsconfig.json
-      - name: 前端构建
-        run: npm run build
-      - name: i18n 词典与面板名检查
-        run: node scripts/i18n/check.mjs
-
-  backend:
-    name: Rust 编译检查与单测
-    runs-on: ubuntu-latest
+  check:
+    name: ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    defaults:
+      run:
+        working-directory: rust
     steps:
       - uses: actions/checkout@v4
 
-      - name: 安装 Tauri Linux 构建依赖
+      # gpui 在 Linux 上要 pkg-config 找到 xkbcommon / fontconfig 等；
+      # 运行期依赖 Wayland 或 X11，构建期只需要开发头文件。
+      - name: 安装 Linux 构建依赖
+        if: runner.os == 'Linux'
+        working-directory: .
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
-            libwebkit2gtk-4.1-dev build-essential curl wget file \
-            libxdo-dev libssl-dev libayatana-appindicator3-dev librsvg2-dev
+            build-essential pkg-config cmake \
+            libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev \
+            libfontconfig-dev libfreetype-dev libssl-dev libzstd-dev libvulkan-dev
 
       - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt
 
       - uses: Swatinem/rust-cache@v2
         with:
-          workspaces: src-tauri -> target
+          workspaces: rust -> target
 
-      - name: 垫占位 dist（防 generate_context! 找不到 frontendDist）
-        run: |
-          [ -d dist ] || { mkdir -p dist && echo '<!doctype html>' > dist/index.html; }
+      - name: 格式检查
+        if: runner.os == 'Linux'
+        run: cargo fmt --all -- --check
 
-      - name: 编译检查
-        working-directory: src-tauri
-        run: cargo check --all-targets
+      - name: 编译
+        run: cargo build --workspace
 
       - name: 单元测试
-        working-directory: src-tauri
-        run: cargo test
+        run: cargo test --workspace
