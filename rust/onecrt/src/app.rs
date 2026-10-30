@@ -8,8 +8,8 @@ use gpui::prelude::FluentBuilder as _;
 use gpui::{
     div, point, px, size, AnyWindowHandle, AppContext, Bounds, Context, CursorStyle, Div, Entity,
     InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels, Point, Render,
-    SharedString, Stateful, StatefulInteractiveElement, Styled, Subscription, TitlebarOptions, Window,
-    WindowBounds, WindowControlArea, WindowOptions,
+    SharedString, Stateful, StatefulInteractiveElement, Styled, Subscription, TitlebarOptions,
+    Window, WindowBounds, WindowControlArea, WindowOptions,
 };
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{
@@ -4332,14 +4332,12 @@ impl Render for OneCrt {
         let (inset_l, inset_r, inset_t, inset_b) = self.dock_insets();
         // 分隔条只做拖拽热区，绝对定位压在面板边界上，不占布局空间，避免面板之间露出底色缝隙。
         if left_open {
-            main = main.child(
-                split_handle("split-left", SplitEdge::Left).left(px(self.left_w - 3.)),
-            );
+            main =
+                main.child(split_handle("split-left", SplitEdge::Left).left(px(self.left_w - 3.)));
         }
         if right_open {
-            main = main.child(
-                split_handle("split-right", SplitEdge::Right).right(px(self.right_w - 3.)),
-            );
+            main = main
+                .child(split_handle("split-right", SplitEdge::Right).right(px(self.right_w - 3.)));
         }
         if top_open {
             main = main.child(

@@ -1,3 +1,10 @@
+// Windows 默认把 [[bin]] 链接成控制台子系统（PE Subsystem=3 CUI），从资源管理器双击、
+// 桌面快捷方式或安装完的「运行 OneCRT」启动时，系统会先给进程新建一个控制台，
+// 于是主窗口前面多出一个黑色命令行窗口。这里在非 debug 构建切成 GUI 子系统（=2）。
+// debug 故意保留控制台：panic（例如主线程栈溢出）和 eprintln 只有在那个窗口里看得见，
+// 否则调试期崩掉就是彻底无声的「点了没反应」。
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
 mod about_dialog;
 mod app;
 mod command_form;
