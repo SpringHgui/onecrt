@@ -69,31 +69,82 @@ jobs:
       - name: 构建
         run: cargo build --release -p onecrt
 
-      - name: 准备安装包文件
+      - name: 准备 Inno Setup
         shell: pwsh
         run: |
-          $stage = "target/installer/stage"
-          New-Item -ItemType Directory -Force $stage | Out-Null
-          Copy-Item target/release/onecrt.exe $stage
-          $crt = "$env:SystemRoot\System32\vcruntime140.dll"
-          if (Test-Path $crt) { Copy-Item $crt $stage }
+          $ErrorActionPreference = 'Stop'
 
-      - name: 安装 Inno Setup
-        shell: pwsh
-        run: |
-          $url = "https://jrsoftware.org/download.php/is.exe"
-          $installer = "$env:TEMP\innosetup.exe"
-          Invoke-WebRequest -Uri $url -OutFile $installer
-          Start-Process -FilePath $installer -ArgumentList "/VERYSILENT /SUPPRESSMSGBOXES /NORESTART" -Wait
-          Remove-Item $installer
+          # 2026-03 起 jrsoftware 把二进制全部挪到 GitHub Release（issrc 仓库），
+          # download.php/is.exe 现在 302 到一个 HTML 下载列表页。照旧 Invoke-WebRequest
+          # 存成 .exe 再 Start-Process，Windows 只会报「文件或目录损坏且无法读取」——
+          # 装的其实是 11KB 网页。所以优先用 runner 镜像自带的 Inno Setup（当前 6.7.1），
+          # 只在它缺失时按固定版本 + 校验和下载真二进制。
+          $pinUrl = 'https://github.com/jrsoftware/issrc/releases/download/is-6_7_4/innosetup-6.7.4.exe'
+          $pinSize = 10604576
+          $pinSha256 = 'a549929319f9120716677c685535ca4671e4b937b5fdc87e2585f32d8eb30e8c'
+
+          function Find-Iscc {
+            # 镜像里装的在哪由镜像说了算（6.x 常见于 Program Files (x86)，7.x 在 Program Files），
+            # 所以按目录通配找，别再硬编码某个具体路径。
+            Get-ChildItem $env:ProgramFiles, "${env:ProgramFiles(x86)}" -Directory -Filter 'Inno Setup *' -ErrorAction SilentlyContinue |
+              ForEach-Object { Join-Path $_.FullName 'ISCC.exe' } |
+              Where-Object { Test-Path $_ } |
+              Select-Object -First 1
+          }
+
+          function Test-IsccUsable([string]$Path) {
+            if (-not $Path -or -not (Test-Path $Path)) { return $false }
+            # onecrt.iss 用了简体中文语言文件，精简安装没有它的话 ISCC 会挂在很费解的报错上
+            if (-not (Test-Path (Join-Path (Split-Path $Path) 'Languages\ChineseSimplified.isl'))) {
+              Write-Host "$Path 缺少 Languages\ChineseSimplified.isl，改用官方完整安装包"
+              return $false
+            }
+            return $true
+          }
+
+          $iscc = Find-Iscc
+          if (Test-IsccUsable $iscc) {
+            Write-Host "使用 runner 自带的 Inno Setup：$iscc"
+          } else {
+            $iscc = $null
+            Write-Host "镜像里的 Inno Setup 不可用，下载并安装 pinned 6.7.4"
+            $installer = Join-Path $env:RUNNER_TEMP 'innosetup-6.7.4.exe'
+            Invoke-WebRequest -Uri $pinUrl -OutFile $installer -UseBasicParsing
+
+            $size = (Get-Item $installer).Length
+            if ($size -ne $pinSize) {
+              throw "下载到的 innosetup 大小不对：期望 $pinSize 字节，实际 $size 字节（多半又是拿回 HTML 而不是二进制）"
+            }
+            $head = New-Object byte[] 2
+            $fs = [System.IO.File]::OpenRead($installer); $null = $fs.Read($head, 0, 2); $fs.Close()
+            if ($head[0] -ne 0x4D -or $head[1] -ne 0x5A) {
+              $magic = [System.Text.Encoding]::ASCII.GetString($head)
+              throw "下载结果不是 PE 可执行文件（文件头是 '$magic'），jrsoftware 的发布地址或文件名大概又变了：$pinUrl"
+            }
+            $hash = (Get-FileHash $installer -Algorithm SHA256).Hash.ToLowerInvariant()
+            if ($hash -ne $pinSha256) {
+              throw "innosetup-6.7.4.exe 校验和不匹配：$hash（应为 $pinSha256）"
+            }
+
+            $proc = Start-Process -FilePath $installer -ArgumentList '/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART' -Wait -PassThru
+            if ($proc.ExitCode -ne 0) {
+              throw "Inno Setup 静默安装失败，退出码 $($proc.ExitCode)"
+            }
+
+            $iscc = Find-Iscc
+            if (-not (Test-IsccUsable $iscc)) { throw "装完仍找不到带简体中文语言的 ISCC.exe" }
+            Write-Host "已安装：$iscc"
+          }
+
+          "ISCC=$iscc" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: 生成安装包
         shell: pwsh
         run: |
-          $ver = "${{ needs.meta.outputs.version }}"
-          $iscc = "C:\Program Files (x86)\Inno Setup 6\ISCC.exe"
-          $stage = (Resolve-Path "target/installer/stage").Path
-          & $iscc "/DMyAppVersion=$ver" "/DStageDir=$stage" "installer/onecrt.iss"
+          # 复用本地构建脚本，避免 CI 与本地的 staging / ISCC 查找逻辑各写一份而漂移。
+          # 它自己从 rust/Cargo.toml 读版本号（meta job 已校验 tag 与之一致）。
+          & "$env:GITHUB_WORKSPACE/rust/installer/build-installer.ps1" -SkipBuild -Iscc $env:ISCC
+          if (-not $?) { throw 'build-installer.ps1 执行失败' }
           Get-ChildItem target/installer -Filter '*.exe' | Select-Object Name, Length
 
       - uses: actions/upload-artifact@v4
