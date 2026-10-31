@@ -50,8 +50,12 @@ VersionInfoCompany={#MyAppPublisher}
 VersionInfoProductName={#MyAppName}
 VersionInfoDescription={#MyAppName} Setup
 
+; 简体中文在 Inno Setup 6 里还是 unofficial 翻译，官方安装包只放 Files\Languages\*.isl，
+; 不带 ChineseSimplified.isl（到 Inno Setup 7 才转成官方语言），所以 CI 无论怎么装都找不到它。
+; 这里改成引用随仓库走的那份：jrsoftware/issrc tag is-6_7_4 的
+; Files/Languages/Unofficial/ChineseSimplified.isl，维护者 Zhenghan Yang。
 [Languages]
-Name: "zh"; MessagesFile: "compiler:Languages\ChineseSimplified.isl"
+Name: "zh"; MessagesFile: "languages\ChineseSimplified.isl"
 Name: "en"; MessagesFile: "compiler:Default.isl"
 
 [Tasks]

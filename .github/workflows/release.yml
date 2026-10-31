@@ -74,10 +74,14 @@ jobs:
         run: |
           $ErrorActionPreference = 'Stop'
 
+          # 简体中文语言文件不再在这儿找：Inno Setup 6 里它还是 unofficial 翻译，官方安装包
+          # 只装 Files\Languages\*.isl（7 才把它转正），所以镜像里和手动装的 6.x 都不会带它。
+          # 现在随仓库走：rust\installer\languages\ChineseSimplified.isl，onecrt.iss 用相对路径引用。
+          #
           # 2026-03 起 jrsoftware 把二进制全部挪到 GitHub Release（issrc 仓库），
           # download.php/is.exe 现在 302 到一个 HTML 下载列表页。照旧 Invoke-WebRequest
           # 存成 .exe 再 Start-Process，Windows 只会报「文件或目录损坏且无法读取」——
-          # 装的其实是 11KB 网页。所以优先用 runner 镜像自带的 Inno Setup（当前 6.7.1），
+          # 装的其实是 11KB 网页。所以优先用 runner 镜像自带的 Inno Setup，
           # 只在它缺失时按固定版本 + 校验和下载真二进制。
           $pinUrl = 'https://github.com/jrsoftware/issrc/releases/download/is-6_7_4/innosetup-6.7.4.exe'
           $pinSize = 10604576
@@ -92,22 +96,17 @@ jobs:
               Select-Object -First 1
           }
 
-          function Test-IsccUsable([string]$Path) {
-            if (-not $Path -or -not (Test-Path $Path)) { return $false }
-            # onecrt.iss 用了简体中文语言文件，精简安装没有它的话 ISCC 会挂在很费解的报错上
-            if (-not (Test-Path (Join-Path (Split-Path $Path) 'Languages\ChineseSimplified.isl'))) {
-              Write-Host "$Path 缺少 Languages\ChineseSimplified.isl，改用官方完整安装包"
-              return $false
-            }
-            return $true
+          function Report-Iscc([string]$Path) {
+            $v = (Get-Item $Path).VersionInfo.ProductVersion
+            Write-Host "ISCC.exe $v：$Path"
           }
 
           $iscc = Find-Iscc
-          if (Test-IsccUsable $iscc) {
-            Write-Host "使用 runner 自带的 Inno Setup：$iscc"
+          if ($iscc) {
+            Write-Host "使用 runner 自带的 Inno Setup"
+            Report-Iscc $iscc
           } else {
-            $iscc = $null
-            Write-Host "镜像里的 Inno Setup 不可用，下载并安装 pinned 6.7.4"
+            Write-Host "镜像里没有 Inno Setup，下载并安装 pinned 6.7.4"
             $installer = Join-Path $env:RUNNER_TEMP 'innosetup-6.7.4.exe'
             Invoke-WebRequest -Uri $pinUrl -OutFile $installer -UseBasicParsing
 
@@ -132,8 +131,8 @@ jobs:
             }
 
             $iscc = Find-Iscc
-            if (-not (Test-IsccUsable $iscc)) { throw "装完仍找不到带简体中文语言的 ISCC.exe" }
-            Write-Host "已安装：$iscc"
+            if (-not $iscc) { throw "装完仍找不到 ISCC.exe" }
+            Report-Iscc $iscc
           }
 
           "ISCC=$iscc" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
