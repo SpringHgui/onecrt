@@ -1,8 +1,15 @@
 <div align="center">
-  <img src="docs/screenshot-dark.png" width="880" alt="OneCRT 主界面：左侧会话树，中间 SSH 终端，右侧性能面板">
+  <img src="docs/logo.png" width="88" alt="OneCRT">
   <h1>OneCRT</h1>
-  <p>纯 Rust 编写的跨平台 SSH 终端</p>
+  <p>最后一个下一代 SSH 终端。</p>
+  <p>支持 Windows、Linux、MacOS</p>
 </div>
+
+<img src="docs/screenshot-light.png" width="100%" alt="浅色主题：左侧会话树，中间 SSH 终端，下方性能面板，右侧 SFTP 文件面板与传输列表">
+
+<img src="docs/screenshot-dark.png" width="100%" alt="深色主题：与会话树、终端、性能面板、文件面板同一布局">
+
+OneCRT 是纯 Rust 编写的 SSH 客户端，界面用 gpui 原生绘制。终端、SFTP 文件传输和主机性能面板落在同一个窗口里，会话树与命令库存成本机 JSON。
 
 ## 功能
 
@@ -17,34 +24,9 @@
 - **深浅主题与中英切换**：偏好写入 `ui.json`，重启后保留。
 - **检查更新**：关于对话框里查询 GitHub 最新 Release，有新版本时给下载页（不自动替换正在运行的二进制）。
 
-## 构建与运行
-
-`rust/` 是一个 Cargo workspace：`onecrt-core`（无界面内核：会话、SSH、SFTP、导入器、MCP）与 `onecrt`（gpui 界面）。
-
-```bash
-cd rust
-cargo run --release -p onecrt
-```
-
-Linux 构建需要开发头文件：`libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libx11-xcb-dev libfontconfig-dev libfreetype-dev libvulkan-dev`。Windows 与 macOS 用默认工具链即可。
-
-推送 `v*` tag 会触发 `.github/workflows/release.yml`，出 Windows / Linux / macOS 三平台便携包与 `SHA256SUMS.txt`。
-
-## 数据目录
-
-`%APPDATA%\shellx`（Windows）、`~/.config/shellx`（Linux）、`~/Library/Application Support/shellx`（macOS），内含 `sessions.json`、`commands.json`、`mcp.json` 与 `ui.json`。
-
 ## 已知取舍
 
 - 只实现 SSH2；首次连接自动接受主机密钥，不做指纹确认。
 - 发布物是压缩包而非安装器，且未做代码签名（Windows SmartScreen / macOS Gatekeeper 会提示）。
 - 检查更新只提示新版本并打开下载页，不做自动安装。
 - MCP 只覆盖 SSH 终端；SFTP 未开放为工具。面向内网运维，不建议用在外部分发的机器上。
-
-## 目录
-
-- `rust/` — 应用本体（0.3 起为纯 Rust 实现，旧的 Tauri/React 代码已移除）
-- `site/` — 官网，独立发布到 GitHub Pages
-- `docs/` — 截图等文档素材
-
-第三方产品名称与标识的说明见 [NOTICE.md](NOTICE.md)。
