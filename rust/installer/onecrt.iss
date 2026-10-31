@@ -4,7 +4,7 @@
 ; 拷进 target\installer\stage，再把版本号与 stage 目录作为 /D 传进来。
 ;
 ; 手动编译：
-;   ISCC.exe /DMyAppVersion=0.3.1 /DStageDir=..\target\installer\stage onecrt.iss
+;   ISCC.exe /DMyAppVersion=0.3.2 /DStageDir=..\target\installer\stage onecrt.iss
 
 #ifndef MyAppVersion
   #define MyAppVersion "0.0.0"
