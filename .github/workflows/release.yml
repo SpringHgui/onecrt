@@ -97,8 +97,9 @@ jobs:
           }
 
           function Report-Iscc([string]$Path) {
-            $v = (Get-Item $Path).VersionInfo.ProductVersion
-            Write-Host "ISCC.exe $v：$Path"
+            # ISCC.exe 的 VersionInfo 是 0.0.0.0（jrsoftware 不填），真正的编译器版本
+            # 看下一步的编译横幅：「Compiler engine version: Inno Setup 6.7.1」。
+            Write-Host "ISCC.exe：$Path"
           }
 
           $iscc = Find-Iscc
