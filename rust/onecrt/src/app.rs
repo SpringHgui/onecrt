@@ -6,8 +6,8 @@ use std::sync::Arc;
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    div, point, px, size, AnyWindowHandle, AppContext, Bounds, Context, CursorStyle, Div, Entity,
-    InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels, Point, Render,
+    div, point, px, relative, size, AnyWindowHandle, AppContext, Bounds, Context, CursorStyle, Div,
+    Entity, InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels, Point, Render,
     SharedString, Stateful, StatefulInteractiveElement, Styled, Subscription, TitlebarOptions,
     Window, WindowBounds, WindowControlArea, WindowOptions,
 };
@@ -137,11 +137,11 @@ impl DockZone {
     }
 }
 
+/// 一组页签：同一时刻只显示 active 那个；一条边上下分栏后，边上可以有两组。
 #[derive(Clone, Default)]
 struct DockGroup {
     panels: Vec<PanelId>,
     active: Option<PanelId>,
-    collapsed: bool,
 }
 
 impl DockGroup {
@@ -154,7 +154,6 @@ impl DockGroup {
             self.panels.push(panel);
         }
         self.active = Some(panel);
-        self.collapsed = false;
     }
 
     fn remove(&mut self, panel: PanelId) -> bool {
@@ -164,16 +163,78 @@ impl DockGroup {
         if removed && self.active == Some(panel) {
             self.active = self.panels.last().copied();
         }
-        if self.panels.is_empty() {
+        removed
+    }
+}
+
+/// 一条停靠边的布局：左右两边可以上下各放一组（分栏），上下两条边只有一组。
+#[derive(Clone)]
+struct DockArea {
+    groups: Vec<DockGroup>,
+    collapsed: bool,
+    /// 上下分栏时，上面那格占整条边高度的比例。
+    split: f32,
+}
+
+impl Default for DockArea {
+    fn default() -> Self {
+        Self {
+            groups: Vec::new(),
+            collapsed: false,
+            split: 0.5,
+        }
+    }
+}
+
+impl DockArea {
+    fn is_empty(&self) -> bool {
+        self.groups.is_empty()
+    }
+
+    fn contains(&self, panel: PanelId) -> bool {
+        self.groups.iter().any(|group| group.contains(panel))
+    }
+
+    fn group_of(&self, panel: PanelId) -> Option<usize> {
+        self.groups.iter().position(|group| group.contains(panel))
+    }
+
+    fn panels(&self) -> impl Iterator<Item = PanelId> + '_ {
+        self.groups
+            .iter()
+            .flat_map(|group| group.panels.iter().copied())
+    }
+
+    /// 当前组：活动面板所在的那一组，没有活动面板时退到最后一组。
+    fn active_group(&self, active: PanelId) -> Option<usize> {
+        self.group_of(active)
+            .or_else(|| self.groups.len().checked_sub(1))
+    }
+
+    fn remove(&mut self, panel: PanelId) -> bool {
+        let mut removed = false;
+        for group in &mut self.groups {
+            removed |= group.remove(panel);
+        }
+        self.groups.retain(|group| !group.panels.is_empty());
+        if self.groups.is_empty() {
             self.collapsed = false;
         }
         removed
     }
 }
 
+/// 拖到一条边的哪一段：上/下两段各开一格（侧边上下分栏），中间段并进当前组的页签。
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum DockSlot {
+    Upper,
+    Middle,
+    Lower,
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum DockTarget {
-    Zone(DockZone),
+    Zone(DockZone, DockSlot),
     Float,
 }
 
@@ -236,6 +297,25 @@ struct VDivider;
 
 struct TopDivider;
 
+/// 侧边上下分栏的分隔条；拖动时按整条边的高度换算上格比例。
+#[derive(Clone, Copy)]
+struct SideDivider(DockZone);
+
+const SIDE_SPLIT_MIN: f32 = 0.18;
+const SIDE_SPLIT_MAX: f32 = 0.82;
+
+/// 侧边一格的拖放落点：上三分之一、下三分之一各开新格，中间并页签。
+fn side_slot(y: f32, tall: f32) -> DockSlot {
+    let band = tall / 3.;
+    if y < band {
+        DockSlot::Upper
+    } else if y > tall - band {
+        DockSlot::Lower
+    } else {
+        DockSlot::Middle
+    }
+}
+
 #[derive(Clone)]
 struct CmdClip {
     node: CmdNode,
@@ -273,7 +353,7 @@ pub struct OneCrt {
     files: Option<Entity<FilePanel>>,
     perf: Option<Entity<PerfPanel>>,
     _perf_sub: Option<Subscription>,
-    groups: [DockGroup; 4],
+    areas: [DockArea; 4],
     bottom_h: f32,
     top_h: f32,
     active_panel: PanelId,
@@ -380,15 +460,19 @@ impl OneCrt {
             files: None,
             perf: None,
             _perf_sub: None,
-            groups: [
-                DockGroup {
-                    panels: vec![PanelId::Sessions, PanelId::Commands],
-                    active: Some(PanelId::Sessions),
+            areas: [
+                // 出厂左栏：会话与命令叠成一组页签；拖到上/下段才拆成上下两格。
+                DockArea {
+                    groups: vec![DockGroup {
+                        panels: vec![PanelId::Sessions, PanelId::Commands],
+                        active: Some(PanelId::Sessions),
+                    }],
                     collapsed: false,
+                    split: 0.5,
                 },
-                DockGroup::default(),
-                DockGroup::default(),
-                DockGroup::default(),
+                DockArea::default(),
+                DockArea::default(),
+                DockArea::default(),
             ],
             bottom_h: 210.,
             top_h: 190.,
@@ -463,7 +547,7 @@ impl OneCrt {
     fn zone_of(&self, panel: PanelId) -> Option<DockZone> {
         DockZone::ALL
             .into_iter()
-            .find(|zone| self.groups[zone.index()].contains(panel))
+            .find(|zone| self.areas[zone.index()].contains(panel))
     }
 
     fn float_of(&self, panel: PanelId) -> Option<AnyWindowHandle> {
@@ -477,12 +561,60 @@ impl OneCrt {
         self.zone_of(panel).is_some() || self.float_of(panel).is_some()
     }
 
+    fn group_of_panel(&self, panel: PanelId) -> Option<(DockZone, usize)> {
+        DockZone::ALL.into_iter().find_map(|zone| {
+            self.areas[zone.index()]
+                .group_of(panel)
+                .map(|gi| (zone, gi))
+        })
+    }
+
+    /// 把面板放进某条边：侧边的上/下段新开一格（上下分栏），中间段并进当前组的页签。
+    fn place_panel(&mut self, panel: PanelId, zone: DockZone, slot: DockSlot) {
+        let active = self.active_panel;
+        let side = matches!(zone, DockZone::Left | DockZone::Right);
+        let area = &mut self.areas[zone.index()];
+        area.collapsed = false;
+        if area.groups.is_empty() {
+            area.groups.push(DockGroup {
+                panels: vec![panel],
+                active: Some(panel),
+            });
+            return;
+        }
+        if side && area.groups.len() < 2 {
+            let fresh = DockGroup {
+                panels: vec![panel],
+                active: Some(panel),
+            };
+            match slot {
+                DockSlot::Upper => {
+                    area.groups.insert(0, fresh);
+                    return;
+                }
+                DockSlot::Lower => {
+                    area.groups.push(fresh);
+                    return;
+                }
+                DockSlot::Middle => {}
+            }
+        }
+        let index = match slot {
+            DockSlot::Upper if area.groups.len() > 1 => 0,
+            DockSlot::Lower if area.groups.len() > 1 => area.groups.len() - 1,
+            _ => area
+                .active_group(active)
+                .unwrap_or_else(|| area.groups.len() - 1),
+        };
+        area.groups[index].add(panel);
+    }
+
     fn show_panel(&mut self, panel: PanelId, cx: &mut Context<Self>) {
         self.ensure_panel(panel, cx);
-        if let Some(zone) = self.zone_of(panel) {
-            let group = &mut self.groups[zone.index()];
-            group.active = Some(panel);
-            group.collapsed = false;
+        if let Some((zone, gi)) = self.group_of_panel(panel) {
+            let area = &mut self.areas[zone.index()];
+            area.groups[gi].active = Some(panel);
+            area.collapsed = false;
             if self.peek.map(|p| p.zone == zone).unwrap_or(false) {
                 self.peek = None;
                 self.peek_gen = self.peek_gen.wrapping_add(1);
@@ -495,7 +627,7 @@ impl OneCrt {
         } else if let Some(handle) = self.float_of(panel) {
             let _ = handle.update(cx, |_, window, _| window.activate_window());
         } else {
-            self.groups[panel.default_zone().index()].add(panel);
+            self.place_panel(panel, panel.default_zone(), DockSlot::Middle);
         }
         self.active_panel = panel;
         cx.notify();
@@ -510,10 +642,8 @@ impl OneCrt {
     }
 
     fn activate_panel(&mut self, panel: PanelId, cx: &mut Context<Self>) {
-        for group in &mut self.groups {
-            if group.contains(panel) {
-                group.active = Some(panel);
-            }
+        if let Some((zone, gi)) = self.group_of_panel(panel) {
+            self.areas[zone.index()].groups[gi].active = Some(panel);
         }
         // 自动隐藏时换页签只换浮出内容，不把分组重新停靠展开。
         if let Some(peek) = &mut self.peek {
@@ -530,10 +660,10 @@ impl OneCrt {
 
     /// 自动隐藏的窄条悬停：探出浮层；点住页签后固定，直到点别处。
     fn peek_open(&mut self, zone: DockZone, panel: PanelId, sticky: bool, cx: &mut Context<Self>) {
-        if !self.groups[zone.index()].contains(panel) {
+        let Some(gi) = self.areas[zone.index()].group_of(panel) else {
             return;
-        }
-        self.groups[zone.index()].active = Some(panel);
+        };
+        self.areas[zone.index()].groups[gi].active = Some(panel);
         self.active_panel = panel;
         self.peek = Some(DockPeek {
             zone,
@@ -604,7 +734,7 @@ impl OneCrt {
     }
 
     fn set_collapsed(&mut self, zone: DockZone, collapsed: bool, cx: &mut Context<Self>) {
-        self.groups[zone.index()].collapsed = collapsed;
+        self.areas[zone.index()].collapsed = collapsed;
         if self.peek.map(|p| p.zone == zone).unwrap_or(false) {
             self.peek = None;
             self.peek_gen = self.peek_gen.wrapping_add(1);
@@ -615,10 +745,10 @@ impl OneCrt {
     /// 停靠区之外的可见范围：给浮层和点空白收起用的背景层定位。
     fn dock_insets(&self) -> (f32, f32, f32, f32) {
         let span = |zone: DockZone| {
-            let group = &self.groups[zone.index()];
-            if group.panels.is_empty() {
+            let area = &self.areas[zone.index()];
+            if area.is_empty() {
                 0.
-            } else if group.collapsed {
+            } else if area.collapsed {
                 if matches!(zone, DockZone::Bottom | DockZone::Top) {
                     30.
                 } else {
@@ -642,8 +772,8 @@ impl OneCrt {
     }
 
     fn remove_panel_state(&mut self, panel: PanelId) {
-        for group in &mut self.groups {
-            group.remove(panel);
+        for area in &mut self.areas {
+            area.remove(panel);
         }
     }
 
@@ -709,7 +839,13 @@ impl OneCrt {
         cx.notify();
     }
 
-    fn dock_panel(&mut self, panel: PanelId, zone: DockZone, cx: &mut Context<Self>) {
+    fn dock_panel(
+        &mut self,
+        panel: PanelId,
+        zone: DockZone,
+        slot: DockSlot,
+        cx: &mut Context<Self>,
+    ) {
         self.ensure_panel(panel, cx);
         let floating = self.take_float(panel);
         self.remove_panel_state(panel);
@@ -720,8 +856,75 @@ impl OneCrt {
         if let Some(handle) = floating {
             Self::close_float_window(handle, cx);
         }
-        self.groups[zone.index()].add(panel);
+        self.place_panel(panel, zone, slot);
         self.active_panel = panel;
+        cx.notify();
+    }
+
+    /// 页签 → 上下分栏：把这一组里非活动的面板挪到下方新开的一格。
+    fn split_group(&mut self, zone: DockZone, gi: usize, cx: &mut Context<Self>) {
+        if !matches!(zone, DockZone::Left | DockZone::Right) {
+            return;
+        }
+        let area = &mut self.areas[zone.index()];
+        if area.groups.len() >= 2 {
+            return;
+        }
+        let Some(group) = area.groups.get(gi) else {
+            return;
+        };
+        if group.panels.len() < 2 {
+            return;
+        }
+        let keep = group.active.unwrap_or(group.panels[0]);
+        let moved: Vec<PanelId> = group
+            .panels
+            .iter()
+            .copied()
+            .filter(|panel| *panel != keep)
+            .collect();
+        area.groups[gi].panels.retain(|panel| *panel == keep);
+        area.groups[gi].active = Some(keep);
+        area.groups.push(DockGroup {
+            active: moved.first().copied(),
+            panels: moved,
+        });
+        area.collapsed = false;
+        if self
+            .peek
+            .map(|p| p.zone == zone && p.panel != keep)
+            .unwrap_or(false)
+        {
+            self.peek = None;
+            self.peek_gen = self.peek_gen.wrapping_add(1);
+        }
+        cx.notify();
+    }
+
+    /// 取消分栏：下面那格并回上面那一组的页签。
+    fn merge_groups(&mut self, zone: DockZone, cx: &mut Context<Self>) {
+        if !matches!(zone, DockZone::Left | DockZone::Right) {
+            return;
+        }
+        let area = &mut self.areas[zone.index()];
+        if area.groups.len() < 2 {
+            return;
+        }
+        let lower = area.groups.pop().unwrap();
+        if let Some(first) = area.groups.first_mut() {
+            for panel in lower.panels {
+                if !first.contains(panel) {
+                    first.panels.push(panel);
+                }
+            }
+            if first.active.is_none() {
+                first.active = first.panels.first().copied();
+            }
+        }
+        if self.peek.map(|p| p.zone == zone).unwrap_or(false) {
+            self.peek = None;
+            self.peek_gen = self.peek_gen.wrapping_add(1);
+        }
         cx.notify();
     }
 
@@ -2231,10 +2434,40 @@ impl OneCrt {
             .child(content)
     }
 
-    /// 一组页签：标题栏（浮动/停靠/自动隐藏/关闭）+ 内容 + 底部页签条，对齐 VS 工具窗口。
-    fn dock_group(&self, zone: DockZone, cx: &mut Context<Self>) -> Div {
+    /// 一条边上的一格：标题栏（浮动/停靠/自动隐藏/关闭）+ 内容 + 底部页签条，
+    /// 对齐 VS 工具窗口；一组里只有一个面板时不占一条页签栏。
+    fn dock_card(
+        &self,
+        zone: DockZone,
+        gi: usize,
+        group: &DockGroup,
+        cx: &mut Context<Self>,
+    ) -> Div {
         let t = self.theme.clone();
-        let group = self.groups[zone.index()].clone();
+        let mut el = div().flex().flex_col().min_h_0().overflow_hidden().bg(t.bg);
+        let Some(active) = group.active else {
+            return el;
+        };
+        el = el
+            .child(self.dock_header(zone, gi, active, false, cx))
+            .child(self.panel_body(active, cx));
+        if group.panels.len() > 1 {
+            el = el.child(self.dock_tabs(group, cx));
+        }
+        el
+    }
+
+    /// 一条停靠边：左右两边按上/下两格排（分栏，中间带分隔条），上下两条边只有一格。
+    fn dock_edge(&self, zone: DockZone, cx: &mut Context<Self>) -> Div {
+        let t = self.theme.clone();
+        let area = self.areas[zone.index()].clone();
+        if area.is_empty() {
+            return div();
+        }
+        if area.collapsed {
+            return self.dock_rail(zone, cx);
+        }
+        let side = matches!(zone, DockZone::Left | DockZone::Right);
         let mut el = div().flex().flex_col().bg(t.bg);
         el = match zone {
             DockZone::Left => el.w(px(self.left_w)).flex_shrink_0().h_full().border_r_1(),
@@ -2247,17 +2480,64 @@ impl OneCrt {
             DockZone::Top => el.w_full().h(px(self.top_h)).flex_shrink_0().border_b_1(),
         }
         .border_color(t.line);
-        let Some(active) = group.active else {
+        if !side {
+            if let Some(group) = area.groups.first() {
+                return el.child(self.dock_card(zone, 0, group, cx).flex_1().min_h_0());
+            }
             return el;
-        };
-        el.child(self.dock_header(zone, active, false, cx))
-            .child(self.panel_body(active, cx))
-            .child(self.dock_tabs(&group, cx))
+        }
+        let two = area.groups.len() > 1;
+        let mut col = div().flex_1().min_h_0().flex().flex_col();
+        for (gi, group) in area.groups.iter().enumerate() {
+            if gi > 0 {
+                col = col.child(self.side_split_bar(zone, &t));
+            }
+            let card = self.dock_card(zone, gi, group, cx);
+            col = col.child(if two {
+                card.flex_basis(relative(if gi == 0 { area.split } else { 1. - area.split }))
+                    .flex_grow(0.)
+                    .flex_shrink(1.)
+                    .min_h(px(96.))
+            } else {
+                card.flex_1().min_h_0()
+            });
+        }
+        // 分隔条自己只有一条细线，热区落在整条边上，按边的实际高度换算上格比例。
+        el.child(col).on_drag_move::<SideDivider>(cx.listener(
+            |this, ev: &gpui::DragMoveEvent<SideDivider>, _window, cx| {
+                let zone = ev.drag(cx).0;
+                let top = f32::from(ev.bounds.origin.y);
+                let tall = f32::from(ev.bounds.size.height);
+                if tall <= 0. {
+                    return;
+                }
+                let y = f32::from(ev.event.position.y);
+                let split = ((y - top) / tall).clamp(SIDE_SPLIT_MIN, SIDE_SPLIT_MAX);
+                this.areas[zone.index()].split = split;
+                cx.notify();
+            },
+        ))
+    }
+
+    /// 侧边上下分栏的分隔条：5px 热区里画 1px 细线，拖动改上格比例。
+    fn side_split_bar(&self, zone: DockZone, t: &Theme) -> Stateful<Div> {
+        let theme = t.clone();
+        div()
+            .id(SharedString::from(format!("dock-split-{}", zone.key())))
+            .h(px(5.))
+            .flex_shrink_0()
+            .flex()
+            .items_center()
+            .cursor(CursorStyle::ResizeRow)
+            .hover(move |s| s.bg(theme.bg_hover))
+            .on_drag(SideDivider(zone), |_, _, _, cx| cx.new(|_| SplitGhost))
+            .child(div().h(px(1.)).w_full().bg(t.line))
     }
 
     fn dock_header(
         &self,
         zone: DockZone,
+        gi: usize,
         active: PanelId,
         flyout: bool,
         cx: &mut Context<Self>,
@@ -2268,12 +2548,9 @@ impl OneCrt {
         let pin_theme = t.clone();
         let close_theme = t.clone();
         let drag_theme = t.clone();
-        let (menu_id, pin_id, close_id) = match zone {
-            DockZone::Left => ("dock-menu-left", "dock-pin-left", "dock-close-left"),
-            DockZone::Right => ("dock-menu-right", "dock-pin-right", "dock-close-right"),
-            DockZone::Bottom => ("dock-menu-bottom", "dock-pin-bottom", "dock-close-bottom"),
-            DockZone::Top => ("dock-menu-top", "dock-pin-top", "dock-close-top"),
-        };
+        let menu_id = SharedString::from(format!("dock-menu-{}-{}", zone.key(), gi));
+        let pin_id = SharedString::from(format!("dock-pin-{}-{}", zone.key(), gi));
+        let close_id = SharedString::from(format!("dock-close-{}-{}", zone.key(), gi));
         div()
             .h(px(30.))
             .flex_shrink_0()
@@ -2287,7 +2564,11 @@ impl OneCrt {
             .border_color(t.line)
             .child(
                 div()
-                    .id(SharedString::from(format!("dock-hdr-{}", zone.key())))
+                    .id(SharedString::from(format!(
+                        "dock-hdr-{}-{}",
+                        zone.key(),
+                        gi
+                    )))
                     .flex_1()
                     .min_w_0()
                     .h_full()
@@ -2314,7 +2595,16 @@ impl OneCrt {
                     .icon(IconName::ChevronDown)
                     .text_color(t.text_2)
                     .dropdown_menu(move |menu, window, cx| {
-                        dock_menu(menu, app.clone(), active, lang, false, window, cx)
+                        dock_menu(
+                            menu,
+                            app.clone(),
+                            active,
+                            Some((zone, gi)),
+                            lang,
+                            false,
+                            window,
+                            cx,
+                        )
                     }),
             )
             .child(
@@ -2333,7 +2623,7 @@ impl OneCrt {
                             // 浮层里的图钉 = 重新停靠。
                             this.set_collapsed(zone, false, cx);
                         } else {
-                            let collapsed = !this.groups[zone.index()].collapsed;
+                            let collapsed = !this.areas[zone.index()].collapsed;
                             this.set_collapsed(zone, collapsed, cx);
                         }
                     }))
@@ -2420,7 +2710,7 @@ impl OneCrt {
     fn dock_rail(&self, zone: DockZone, cx: &mut Context<Self>) -> Div {
         let t = self.theme.clone();
         let lang = self.lang;
-        let group = self.groups[zone.index()].clone();
+        let area = self.areas[zone.index()].clone();
         let vertical = matches!(zone, DockZone::Left | DockZone::Right);
         let mut el = div().flex().gap(px(2.)).bg(t.bg);
         el = match zone {
@@ -2454,10 +2744,9 @@ impl OneCrt {
                 .border_b_1(),
         }
         .border_color(t.line);
-        el.children(group.panels.iter().map(|panel| {
-            let panel = *panel;
+        el.children(area.panels().map(|panel| {
             let idle = t.clone();
-            let active = group.active == Some(panel);
+            let active = area.groups.iter().any(|group| group.active == Some(panel));
             let mut tab = div()
                 .id(SharedString::from(format!(
                     "dock-rail-{}-{}",
@@ -2515,7 +2804,9 @@ impl OneCrt {
     /// 自动隐藏的悬停浮层：贴在窄条内侧，盖在内容上，不改变布局。
     fn peek_overlay(&self, t: &Theme, cx: &mut Context<Self>) -> Option<gpui::AnyElement> {
         let peek = self.peek?;
-        let group = self.groups[peek.zone.index()].clone();
+        let area = self.areas[peek.zone.index()].clone();
+        let gi = area.group_of(peek.panel)?;
+        let group = area.groups.get(gi)?.clone();
         let active = group.active?;
         let (left, right, _, _) = self.dock_insets();
         let mut el = div()
@@ -2534,9 +2825,11 @@ impl OneCrt {
                     this.peek_close_later(cx);
                 }
             }))
-            .child(self.dock_header(peek.zone, active, true, cx))
-            .child(self.panel_body(active, cx))
-            .child(self.dock_tabs(&group, cx));
+            .child(self.dock_header(peek.zone, gi, active, true, cx))
+            .child(self.panel_body(active, cx));
+        if group.panels.len() > 1 {
+            el = el.child(self.dock_tabs(&group, cx));
+        }
         el = match peek.zone {
             DockZone::Left => el.left(px(36.)).top_0().bottom_0().w(px(self.left_w)),
             DockZone::Right => el.right(px(36.)).top_0().bottom_0().w(px(self.right_w)),
@@ -2555,11 +2848,11 @@ impl OneCrt {
     }
 
     fn zone_span(&self, zone: DockZone) -> f32 {
-        let group = &self.groups[zone.index()];
-        if group.panels.is_empty() {
+        let area = &self.areas[zone.index()];
+        if area.is_empty() {
             return 0.;
         }
-        if group.collapsed {
+        if area.collapsed {
             return if matches!(zone, DockZone::Bottom | DockZone::Top) {
                 30.
             } else {
@@ -2571,6 +2864,31 @@ impl OneCrt {
             DockZone::Right => self.right_w,
             DockZone::Bottom => self.bottom_h,
             DockZone::Top => self.top_h,
+        }
+    }
+
+    /// 侧边上下分栏时两格的高度占比；还没分栏时按对半分估。
+    fn side_split_fractions(&self, zone: DockZone) -> (f32, f32) {
+        let area = &self.areas[zone.index()];
+        if area.groups.len() > 1 {
+            (area.split, 1. - area.split)
+        } else {
+            (0.5, 0.5)
+        }
+    }
+
+    /// 侧边的落点：还没分栏时按三段判定（上/下段新开一格），已经分栏时按
+    /// 分隔条的位置分成两半，直接决定并进上面还是下面那一格。
+    fn side_target(&self, zone: DockZone, y: f32, tall: f32) -> DockSlot {
+        let area = &self.areas[zone.index()];
+        if area.groups.len() > 1 {
+            if y < area.split * tall {
+                DockSlot::Upper
+            } else {
+                DockSlot::Lower
+            }
+        } else {
+            side_slot(y, tall)
         }
     }
 
@@ -2601,13 +2919,13 @@ impl OneCrt {
         let top = self.zone_span(DockZone::Top);
         let top = if top > 0. { top } else { (h * 0.2).min(140.) };
         if x < left {
-            DockTarget::Zone(DockZone::Left)
+            DockTarget::Zone(DockZone::Left, self.side_target(DockZone::Left, y, h))
         } else if x > w - right {
-            DockTarget::Zone(DockZone::Right)
+            DockTarget::Zone(DockZone::Right, self.side_target(DockZone::Right, y, h))
         } else if y < top {
-            DockTarget::Zone(DockZone::Top)
+            DockTarget::Zone(DockZone::Top, DockSlot::Middle)
         } else if y > h - bottom {
-            DockTarget::Zone(DockZone::Bottom)
+            DockTarget::Zone(DockZone::Bottom, DockSlot::Middle)
         } else {
             DockTarget::Float
         }
@@ -2623,25 +2941,33 @@ impl OneCrt {
         let bottom = self.zone_span(DockZone::Bottom);
         let top = self.zone_span(DockZone::Top);
         let preview = match target {
-            DockTarget::Zone(DockZone::Left) => div()
-                .absolute()
-                .left_0()
-                .top_0()
-                .bottom_0()
-                .w(px(left.max(160.))),
-            DockTarget::Zone(DockZone::Right) => div()
-                .absolute()
-                .right_0()
-                .top_0()
-                .bottom_0()
-                .w(px(right.max(160.))),
-            DockTarget::Zone(DockZone::Bottom) => div()
+            DockTarget::Zone(DockZone::Left, slot) => {
+                let (upper, lower) = self.side_split_fractions(DockZone::Left);
+                let mut el = div().absolute().left_0().w(px(left.max(160.)));
+                el = match slot {
+                    DockSlot::Upper => el.top_0().h(relative(upper)),
+                    DockSlot::Lower => el.bottom_0().h(relative(lower)),
+                    DockSlot::Middle => el.top_0().bottom_0(),
+                };
+                el
+            }
+            DockTarget::Zone(DockZone::Right, slot) => {
+                let (upper, lower) = self.side_split_fractions(DockZone::Right);
+                let mut el = div().absolute().right_0().w(px(right.max(160.)));
+                el = match slot {
+                    DockSlot::Upper => el.top_0().h(relative(upper)),
+                    DockSlot::Lower => el.bottom_0().h(relative(lower)),
+                    DockSlot::Middle => el.top_0().bottom_0(),
+                };
+                el
+            }
+            DockTarget::Zone(DockZone::Bottom, _) => div()
                 .absolute()
                 .left(px(left))
                 .right(px(right))
                 .bottom_0()
                 .h(px(bottom.max(120.))),
-            DockTarget::Zone(DockZone::Top) => div()
+            DockTarget::Zone(DockZone::Top, _) => div()
                 .absolute()
                 .left(px(left))
                 .right(px(right))
@@ -2702,13 +3028,13 @@ impl OneCrt {
                         .h(px(78.))
                         .child(cell(
                             IconName::PanelTop,
-                            target == DockTarget::Zone(DockZone::Top),
+                            matches!(target, DockTarget::Zone(DockZone::Top, _)),
                             27.,
                             0.,
                         ))
                         .child(cell(
                             IconName::PanelLeft,
-                            target == DockTarget::Zone(DockZone::Left),
+                            matches!(target, DockTarget::Zone(DockZone::Left, _)),
                             0.,
                             27.,
                         ))
@@ -2720,13 +3046,13 @@ impl OneCrt {
                         ))
                         .child(cell(
                             IconName::PanelRight,
-                            target == DockTarget::Zone(DockZone::Right),
+                            matches!(target, DockTarget::Zone(DockZone::Right, _)),
                             54.,
                             27.,
                         ))
                         .child(cell(
                             IconName::PanelBottom,
-                            target == DockTarget::Zone(DockZone::Bottom),
+                            matches!(target, DockTarget::Zone(DockZone::Bottom, _)),
                             27.,
                             54.,
                         )),
@@ -2740,7 +3066,7 @@ impl OneCrt {
         };
         self.guide_area = None;
         match target {
-            DockTarget::Zone(zone) => self.dock_panel(panel, zone, cx),
+            DockTarget::Zone(zone, slot) => self.dock_panel(panel, zone, slot, cx),
             DockTarget::Float => self.float_panel(panel, window, cx),
         }
     }
@@ -4238,14 +4564,14 @@ impl Render for OneCrt {
             self.guide = None;
             self.guide_area = None;
         }
-        let left = self.groups[DockZone::Left.index()].clone();
-        let right = self.groups[DockZone::Right.index()].clone();
-        let bottom = self.groups[DockZone::Bottom.index()].clone();
-        let top = self.groups[DockZone::Top.index()].clone();
-        let left_open = !left.panels.is_empty() && !left.collapsed;
-        let right_open = !right.panels.is_empty() && !right.collapsed;
-        let top_open = !top.panels.is_empty() && !top.collapsed;
-        let bottom_open = !bottom.panels.is_empty() && !bottom.collapsed;
+        let left = self.areas[DockZone::Left.index()].clone();
+        let right = self.areas[DockZone::Right.index()].clone();
+        let bottom = self.areas[DockZone::Bottom.index()].clone();
+        let top = self.areas[DockZone::Top.index()].clone();
+        let left_open = !left.is_empty() && !left.collapsed;
+        let right_open = !right.is_empty() && !right.collapsed;
+        let top_open = !top.is_empty() && !top.collapsed;
+        let bottom_open = !bottom.is_empty() && !bottom.collapsed;
 
         let mut main = div()
             .id("dock-main")
@@ -4271,12 +4597,8 @@ impl Render for OneCrt {
             .on_drop::<DockDrag>(cx.listener(|this, drag: &DockDrag, window, cx| {
                 this.drop_panel(drag.panel, window, cx);
             }));
-        if !left.panels.is_empty() {
-            main = main.child(if left.collapsed {
-                self.dock_rail(DockZone::Left, cx)
-            } else {
-                self.dock_group(DockZone::Left, cx)
-            });
+        if !left.is_empty() {
+            main = main.child(self.dock_edge(DockZone::Left, cx));
         }
 
         let mut center = div()
@@ -4286,7 +4608,7 @@ impl Render for OneCrt {
             .min_h_0()
             .flex()
             .flex_col();
-        if !top.panels.is_empty() {
+        if !top.is_empty() {
             center = center
                 .on_drag_move::<TopDivider>(cx.listener(
                     |this, ev: &gpui::DragMoveEvent<TopDivider>, _window, cx| {
@@ -4297,14 +4619,10 @@ impl Render for OneCrt {
                         cx.notify();
                     },
                 ))
-                .child(if top.collapsed {
-                    self.dock_rail(DockZone::Top, cx)
-                } else {
-                    self.dock_group(DockZone::Top, cx)
-                });
+                .child(self.dock_edge(DockZone::Top, cx));
         }
         center = center.child(self.tab_strip(cx)).child(self.body(cx));
-        if !bottom.panels.is_empty() {
+        if !bottom.is_empty() {
             center = center
                 .on_drag_move::<VDivider>(cx.listener(
                     |this, ev: &gpui::DragMoveEvent<VDivider>, _window, cx| {
@@ -4315,18 +4633,12 @@ impl Render for OneCrt {
                         cx.notify();
                     },
                 ))
-                .child(if bottom.collapsed {
-                    self.dock_rail(DockZone::Bottom, cx)
-                } else {
-                    self.dock_group(DockZone::Bottom, cx)
-                });
+                .child(self.dock_edge(DockZone::Bottom, cx));
         }
         main = main.child(center);
 
-        if right_open {
-            main = main.child(self.dock_group(DockZone::Right, cx));
-        } else if !right.panels.is_empty() {
-            main = main.child(self.dock_rail(DockZone::Right, cx));
+        if !right.is_empty() {
+            main = main.child(self.dock_edge(DockZone::Right, cx));
         }
 
         let (inset_l, inset_r, inset_t, inset_b) = self.dock_insets();
@@ -4763,13 +5075,23 @@ fn dock_menu(
     menu: PopupMenu,
     app: Entity<OneCrt>,
     panel: PanelId,
+    at: Option<(DockZone, usize)>,
     lang: Lang,
     from_float: bool,
     _window: &mut Window,
     cx: &mut Context<PopupMenu>,
 ) -> PopupMenu {
-    let floating = app.read(cx).float_of(panel).is_some();
-    let docked = app.read(cx).zone_of(panel).is_some();
+    let (floating, docked, side) = {
+        let this = app.read(cx);
+        (
+            this.float_of(panel).is_some(),
+            this.zone_of(panel).is_some(),
+            at.and_then(|(zone, gi)| {
+                matches!(zone, DockZone::Left | DockZone::Right)
+                    .then(|| (zone, gi, this.areas[zone.index()].clone()))
+            }),
+        )
+    };
 
     let float = {
         let e = app.clone();
@@ -4788,15 +5110,55 @@ fn dock_menu(
             DockZone::Top => tr(lang, "停靠到顶部", "Dock Top"),
         };
         PopupMenuItem::new(label).on_click(move |_, _, cx| {
-            e.update(cx, |this, cx| this.dock_panel(panel, zone, cx));
+            e.update(cx, |this, cx| {
+                this.dock_panel(panel, zone, DockSlot::Middle, cx)
+            });
         })
+    };
+    // 侧边的上下分栏：一组两个页签时拆开，已经两格时并回去。
+    let can_split = side
+        .as_ref()
+        .map(|(_, gi, area)| {
+            area.groups.len() < 2
+                && area
+                    .groups
+                    .get(*gi)
+                    .map(|group| group.panels.len() > 1)
+                    .unwrap_or(false)
+        })
+        .unwrap_or(false);
+    let can_merge = side
+        .as_ref()
+        .map(|(_, _, area)| area.groups.len() > 1)
+        .unwrap_or(false);
+    let split = {
+        let e = app.clone();
+        let target = side.as_ref().map(|(zone, gi, _)| (*zone, *gi));
+        PopupMenuItem::new(tr(lang, "上下分栏", "Split Vertically"))
+            .disabled(!can_split)
+            .on_click(move |_, _, cx| {
+                if let Some((zone, gi)) = target {
+                    e.update(cx, |this, cx| this.split_group(zone, gi, cx));
+                }
+            })
+    };
+    let unsplit = {
+        let e = app.clone();
+        let target = side.as_ref().map(|(zone, _, _)| *zone);
+        PopupMenuItem::new(tr(lang, "取消分栏", "Unsplit"))
+            .disabled(!can_merge)
+            .on_click(move |_, _, cx| {
+                if let Some(zone) = target {
+                    e.update(cx, |this, cx| this.merge_groups(zone, cx));
+                }
+            })
     };
     let auto_hide = {
         let e = app.clone();
         let collapsed = app
             .read(cx)
             .zone_of(panel)
-            .map(|zone| app.read(cx).groups[zone.index()].collapsed)
+            .map(|zone| app.read(cx).areas[zone.index()].collapsed)
             .unwrap_or(false);
         PopupMenuItem::new(tr(lang, "自动隐藏", "Auto Hide"))
             .checked(collapsed)
@@ -4804,7 +5166,7 @@ fn dock_menu(
             .on_click(move |_, _, cx| {
                 e.update(cx, |this, cx| {
                     if let Some(zone) = this.zone_of(panel) {
-                        let collapsed = !this.groups[zone.index()].collapsed;
+                        let collapsed = !this.areas[zone.index()].collapsed;
                         this.set_collapsed(zone, collapsed, cx);
                     }
                 });
@@ -4826,6 +5188,9 @@ fn dock_menu(
         .item(dock_item(DockZone::Right))
         .item(dock_item(DockZone::Bottom))
         .item(dock_item(DockZone::Top))
+        .separator()
+        .item(split)
+        .item(unsplit)
         .separator()
         .item(auto_hide)
         .item(close)
@@ -4912,7 +5277,16 @@ impl Render for PanelWindow {
                             .icon(IconName::ChevronDown)
                             .text_color(menu_theme.text_2)
                             .dropdown_menu(move |menu, window, cx| {
-                                dock_menu(menu, menu_app.clone(), panel, lang, true, window, cx)
+                                dock_menu(
+                                    menu,
+                                    menu_app.clone(),
+                                    panel,
+                                    None,
+                                    lang,
+                                    true,
+                                    window,
+                                    cx,
+                                )
                             }),
                     )
                     .child(
@@ -4954,8 +5328,8 @@ fn view_menu(
             s.panel_visible(PanelId::Files),
             s.panel_visible(PanelId::Perf),
             {
-                let sidebar = &s.groups[DockZone::Left.index()];
-                !sidebar.panels.is_empty() && !sidebar.collapsed
+                let sidebar = &s.areas[DockZone::Left.index()];
+                !sidebar.is_empty() && !sidebar.collapsed
             },
             s.theme.mode == Mode::Dark,
         )
@@ -4978,9 +5352,7 @@ fn view_menu(
     let commands = panel_item(PanelId::Commands, commands_on, !commands_on);
     let files = panel_item(PanelId::Files, files_on, !files_on);
     let perf = panel_item(PanelId::Perf, perf_on, !perf_on);
-    let sidebar_empty = app.read(cx).groups[DockZone::Left.index()]
-        .panels
-        .is_empty();
+    let sidebar_empty = app.read(cx).areas[DockZone::Left.index()].is_empty();
     let sidebar = {
         let e = app.clone();
         PopupMenuItem::new(tr(lang, "自动隐藏侧栏", "Auto Hide Sidebar"))
@@ -4989,7 +5361,7 @@ fn view_menu(
             .on_click(move |_, _, cx| {
                 e.update(cx, |this, cx| {
                     let zone = DockZone::Left;
-                    let collapsed = !this.groups[zone.index()].collapsed;
+                    let collapsed = !this.areas[zone.index()].collapsed;
                     this.set_collapsed(zone, collapsed, cx);
                 });
             })
