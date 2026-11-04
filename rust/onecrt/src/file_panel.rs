@@ -1384,34 +1384,6 @@ impl Render for FilePanel {
             .as_ref()
             .map(|(_, spec)| format!("{}@{}", spec.username, spec.host).into())
             .unwrap_or_else(|| tr(lang, "未连接", "Not connected"));
-        let side_label = match self.focus {
-            SideKind::Local => tr(lang, "本地", "Local"),
-            SideKind::Remote => tr(lang, "远端", "Remote"),
-        };
-        let sel = self.selected_entries(self.focus);
-        let foot: SharedString = if sel.len() == 1 {
-            format!(
-                "{} {} · {}",
-                tr(lang, "已选中", "Selected"),
-                sel[0].name,
-                side_label
-            )
-            .into()
-        } else if sel.is_empty() {
-            format!(
-                "{conn} · {}",
-                tr(
-                    lang,
-                    "Ctrl/Shift 点选、拖拽框选、Ctrl+A 全选",
-                    "Ctrl/Shift click, drag to box-select, Ctrl+A for all"
-                )
-            )
-            .into()
-        } else if lang == Lang::Zh {
-            format!("已选中 {} 项 · {}", sel.len(), side_label).into()
-        } else {
-            format!("{} selected · {}", sel.len(), side_label).into()
-        };
         let footer = div()
             .h(px(24.))
             .flex_shrink_0()
@@ -1423,7 +1395,7 @@ impl Render for FilePanel {
             .overflow_hidden()
             .whitespace_nowrap()
             .text_ellipsis()
-            .child(foot);
+            .child(conn);
 
         let queue_handle = div()
             .id("fp-split-queue")
@@ -1818,7 +1790,11 @@ impl FilePanel {
             let theme = t.clone();
             let entry = entry.clone();
             let selected = sel_set.contains(entry.path.as_str());
-            let bg = if selected { t.bg_selected } else { t.bg };
+            let bg = if selected {
+                t.accent.opacity(0.18)
+            } else {
+                t.bg
+            };
             let path = entry.path.clone();
             let dir = entry.dir;
             let name = entry.name.clone();
@@ -1847,7 +1823,13 @@ impl FilePanel {
                     .pl(px(10.))
                     .pr(px(8.))
                     .bg(bg)
-                    .hover(move |s| s.bg(theme.bg_hover))
+                    .hover(move |s| {
+                        s.bg(if selected {
+                            theme.accent.opacity(0.26)
+                        } else {
+                            theme.bg_hover
+                        })
+                    })
                     .cursor_pointer()
                     .on_mouse_down(
                         MouseButton::Left,
@@ -1905,7 +1887,7 @@ impl FilePanel {
                             .w(px(12.))
                             .flex()
                             .justify_center()
-                            .text_color(t.text_3)
+                            .text_color(if selected { t.accent } else { t.text_3 })
                             .child(Icon::new(icon).size(px(12.))),
                     )
                     .child(
