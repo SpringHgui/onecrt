@@ -471,7 +471,7 @@ impl OneCrt {
             floating: Vec::new(),
             guide: None,
             guide_area: None,
-            left_w: 320.,
+            left_w: 260.,
             right_w: 460.,
             mcp: mcp_status,
             _mcp_poll: mcp_poll,
