@@ -45,7 +45,8 @@ fn main() {
             ]);
 
             let backend = Arc::new(onecrt_core::Backend::new().expect("初始化后台运行时失败"));
-            onecrt_core::boot_mcp(backend.clone(), || {});
+            // MCP 由独立后台进程服务：这里只按落盘的开关补自启登记、必要时装起它
+            onecrt_core::boot_daemon(&backend, || {});
             let options = app::window_options(cx);
             gpui::open_window(options, cx, move |window, cx| {
                 let backend = backend.clone();

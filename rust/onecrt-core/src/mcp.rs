@@ -1,8 +1,11 @@
 //! MCP 服务：把 onecrt 已存的 SSH 会话能力暴露给外部 agent（Qoder / Claude Desktop 等）。
 //!
-//! 三条底线：默认关闭、只听 127.0.0.1、每个请求都要带 `Authorization: Bearer <token>`。
+//! 服务跑在独立的后台进程 `onecrt-mcpd` 里，默认登记开机（登录）自启，主程序开不开都在监听；
+//! 主程序只写 `mcp.json` 并读它写的 `mcpd.json` 心跳，两边都不按 PID 管对方。
+//! 三条底线不变：只听 127.0.0.1、每个请求都要带 `Authorization: Bearer <token>`、
 //! agent 侧拿不到口令——它只能按会话名点用 onecrt 已存的凭据，工具输出里也不回传凭据内容。
 
+use crate::daemon;
 use crate::sessions::{self, Node, SshSession};
 use crate::terminal::{self, OpenArgs, OutEvent};
 use axum::{
@@ -27,7 +30,7 @@ use std::collections::{HashMap, VecDeque};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, RwLock};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use tokio_util::sync::CancellationToken;
 
 /// 缺省端口，避开 8xxx 这类常被 web 服务占用的号段；端口可在设置弹窗里改。
@@ -56,6 +59,7 @@ exported variables carry across calls; use send/read for interactive programs, a
 #[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 struct Config {
+    /// 后台服务开关，同时是开机自启的登记状态：开着它才有人登录时自启、界面才会拉起它
     enabled: bool,
     port: u16,
     token: String,
@@ -64,19 +68,30 @@ struct Config {
 impl Default for Config {
     fn default() -> Self {
         Config {
-            enabled: false,
+            enabled: true,
             port: DEFAULT_PORT,
             token: random_hex(16),
         }
     }
 }
 
-fn config_path() -> Result<PathBuf, String> {
+/// shellx 配置目录，`mcp.json` 与 `mcpd.json` 都落在这儿
+fn config_dir() -> Result<PathBuf, String> {
     let base = dirs::config_dir().ok_or_else(|| "无法获取配置目录".to_string())?;
     let dir = base.join("shellx");
     std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
-    Ok(dir.join("mcp.json"))
+    Ok(dir)
 }
+
+fn config_path() -> Result<PathBuf, String> {
+    Ok(config_dir()?.join("mcp.json"))
+}
+
+/// 后台进程的心跳文件：界面靠它判断在不在监听，不靠进程表
+fn heartbeat_path() -> Result<PathBuf, String> {
+    Ok(config_dir()?.join("mcpd.json"))
+}
+
 /// 读配置。文件缺失或坏掉（含 token 为空）都退回默认值并覆盖写回，
 /// 免得一个残缺文件把服务永久卡在没有可用 token 的状态。
 fn load_config(path: &Path) -> Result<Config, String> {
@@ -95,13 +110,42 @@ fn load_config(path: &Path) -> Result<Config, String> {
 
 fn save_config(cfg: &Config, path: &Path) -> Result<(), String> {
     let text = serde_json::to_string_pretty(cfg).map_err(|e| e.to_string())?;
-    std::fs::write(path, text).map_err(|e| e.to_string())
+    daemon::write_atomic(path, &text)
 }
 
 fn random_hex(n_bytes: usize) -> String {
     let mut buf = vec![0u8; n_bytes];
     getrandom::fill(&mut buf).expect("系统随机源不可用");
     buf.iter().map(|b| format!("{b:02x}")).collect()
+}
+
+fn now_secs() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|d| d.as_secs())
+        .unwrap_or_default()
+}
+
+/// 后台进程每秒写一次的心跳。不带令牌——它写在自己和界面都能读的明文文件里，
+/// 而界面要令牌直接读 mcp.json 就有了，别在第二个文件里再复制一份秘密。
+#[derive(Clone, Debug, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Heartbeat {
+    pub pid: u32,
+    /// 实际绑上的端口（端口被占去重试时也是这个）
+    pub port: u16,
+    pub listening: bool,
+    pub error: Option<String>,
+    /// 写文件的 Unix 秒
+    pub at: u64,
+    #[serde(default)]
+    pub agents: Vec<AgentInfo>,
+}
+
+impl Heartbeat {
+    fn is_live(&self, now: u64) -> bool {
+        daemon::is_live(self.at, now)
+    }
 }
 
 /// agent 开出来的一个无头 SSH 会话，连着它的输出缓冲。
@@ -186,7 +230,7 @@ impl Agent {
     }
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub struct AgentInfo {
     pub terminal_id: String,
@@ -215,12 +259,8 @@ pub struct Runtime {
 
 pub type Shared = Arc<Mutex<Runtime>>;
 
-pub fn new_manager(term: terminal::Shared) -> Shared {
-    let path = config_path().unwrap_or_else(|_| PathBuf::from("mcp.json"));
-    new_manager_at(term, path)
-}
-
-pub fn new_manager_at(term: terminal::Shared, path: PathBuf) -> Shared {
+/// 只有后台进程用：界面不再持有服务运行态，它读文件。
+fn new_manager_at(term: terminal::Shared, path: PathBuf) -> Shared {
     let (cfg, error) = match load_config(&path) {
         Ok(cfg) => (cfg, None),
         Err(e) => (
@@ -244,6 +284,7 @@ pub fn new_manager_at(term: terminal::Shared, path: PathBuf) -> Shared {
 #[derive(Clone, Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct Status {
+    /// 开关状态与「有没有在监听」是两件事：开着开关但后台进程起不来时 enabled=true、running=false
     pub enabled: bool,
     pub running: bool,
     pub port: u16,
@@ -254,9 +295,225 @@ pub struct Status {
     pub agents: Vec<AgentInfo>,
 }
 
-fn status_of(rt: &Runtime) -> Status {
-    // 任务起来了又死掉（panic 或 serve 出错）时不能继续报"监听中"，
-    // 那会让界面上绿字、端口上没人。
+// ------------------------------------------------------------------ 界面侧
+//
+// 界面不再监听端口：它只写 mcp.json、管开机自启登记，在不在监听只看后台进程的心跳文件。
+
+/// 界面看到的 MCP 状态：开关/端口/令牌来自 mcp.json，是否真在监听来自后台进程心跳。
+pub fn client_status() -> Status {
+    let cfg_file = config_path().unwrap_or_else(|_| PathBuf::from("mcp.json"));
+    status_at(&cfg_file, &cfg_file.with_file_name("mcpd.json"))
+}
+
+fn status_at(cfg_file: &Path, hb_file: &Path) -> Status {
+    let (cfg, config_err) = match load_config(cfg_file) {
+        Ok(cfg) => (cfg, None),
+        Err(e) => (
+            Config::default(),
+            Some(format!("mcp.json 读不了，本次按默认配置处理: {e}")),
+        ),
+    };
+    // 只采信还活着的心跳：残留文件会把界面钉在一个早就没人听的旧端口或旧错误上
+    let beat = read_heartbeat_at(hb_file).filter(|b| b.is_live(now_secs()));
+    let port = beat.as_ref().map(|b| b.port).unwrap_or(cfg.port);
+    Status {
+        enabled: cfg.enabled,
+        running: beat.as_ref().is_some_and(|b| b.listening),
+        port,
+        token: cfg.token.clone(),
+        url: format!("http://127.0.0.1:{port}/mcp"),
+        config_file: cfg_file.display().to_string(),
+        error: config_err.or_else(|| beat.as_ref().and_then(|b| b.error.clone())),
+        agents: beat.map(|b| b.agents).unwrap_or_default(),
+    }
+}
+
+fn update_config(f: impl FnOnce(&mut Config)) -> Result<Config, String> {
+    let path = config_path()?;
+    let mut cfg = load_config(&path)?;
+    f(&mut cfg);
+    save_config(&cfg, &path)?;
+    Ok(cfg)
+}
+
+/// 有活着的心跳就算有人在跑，哪怕它正卡在端口被占的重试上——那时再拉一个是抢端口
+fn daemon_alive() -> bool {
+    heartbeat_path()
+        .ok()
+        .and_then(|p| read_heartbeat_at(&p))
+        .is_some_and(|b| b.is_live(now_secs()))
+}
+
+/// 没人在跑就补一个后台进程；已经在跑则什么都不做
+fn ensure_running() -> Result<(), String> {
+    if daemon_alive() {
+        return Ok(());
+    }
+    daemon::spawn()
+}
+
+/// 开：落盘 + 登记登录时自启 + 没人在跑就立刻拉起后台进程。
+/// 关：落盘 + 撤掉自启；正在跑的后台进程下一秒读到开关关掉会自己收工（连带拆掉 agent
+/// 的无头 shell），所以界面不需要按 PID 动它。
+pub fn set_enabled(enabled: bool) -> Result<Status, String> {
+    update_config(|cfg| cfg.enabled = enabled)?;
+    let mut note = None;
+    if enabled {
+        if let Err(e) = daemon::enable_autostart() {
+            note = Some(e);
+        }
+        if let Err(e) = ensure_running() {
+            note = note.or(Some(e));
+        }
+    } else {
+        // 自启项删不掉也不该拦住「关闭」这个动作
+        let _ = daemon::disable_autostart();
+    }
+    let mut status = client_status();
+    if note.is_some() {
+        status.error = note;
+    }
+    Ok(status)
+}
+
+/// 改端口只落盘：在跑的后台进程下一秒重绑新端口，没在跑且开关开着就趁机拉起来
+pub fn set_port(port: u16) -> Result<Status, String> {
+    if port < 1024 {
+        return Err("端口要大于等于 1024".into());
+    }
+    let cfg = update_config(|cfg| cfg.port = port)?;
+    if cfg.enabled {
+        ensure_running()?;
+    }
+    Ok(client_status())
+}
+
+/// 换令牌只落盘：后台进程每秒现读配置，鉴权又是逐请求取最新值，两边都不用重绑端口
+pub fn rotate_token() -> Result<Status, String> {
+    update_config(|cfg| cfg.token = random_hex(16))?;
+    Ok(client_status())
+}
+
+/// 主程序启动时补齐后台服务的状态：开关是开的就得有自启登记和一个在跑的进程。
+/// 自启登记只在发布构建里做，免得开发期 `cargo run` 把 target/debug 的路径写进系统启动项。
+pub fn boot() -> Result<(), String> {
+    if !load_config(&config_path()?)?.enabled {
+        return Ok(());
+    }
+    if !cfg!(debug_assertions) {
+        let _ = daemon::enable_autostart();
+    }
+    ensure_running()
+}
+
+// ------------------------------------------------------------------ 后台进程侧
+
+/// 心跳与配置轮询的间隔：界面改完配置最多等一秒就在状态栏上见效
+const TICK: Duration = Duration::from_secs(1);
+
+/// 后台进程主循环：按 mcp.json 监听，每秒跟一次配置改动，开关关掉就自己收工。
+pub async fn run(term: terminal::Shared) -> Result<(), String> {
+    let state = new_manager_at(term, config_path()?);
+    let hb_file = heartbeat_path()?;
+    if let Some(beat) = read_heartbeat_at(&hb_file) {
+        // 开机自启已经拉起过一个了，界面再点「启动」不该开出第二个
+        if beat.is_live(now_secs()) && beat.pid != std::process::id() {
+            return Ok(());
+        }
+    }
+    if !state.lock().unwrap().cfg.enabled {
+        // 开关关掉之后残留的自启项不该继续监听
+        return Ok(());
+    }
+
+    serve(&state).await;
+    write_heartbeat(&state);
+    loop {
+        tokio::time::sleep(TICK).await;
+        if !reload(&state).await || peer_listens(&state) {
+            break;
+        }
+        write_heartbeat(&state);
+    }
+    // 收工前再写一次，界面立刻显示「未监听」，不用等心跳过期
+    write_heartbeat(&state);
+    Ok(())
+}
+
+/// 该监听却没有活着的任务时补一个。端口被占时不退出：原因写进 error，下一秒再来，
+/// 用户改端口或者占着端口的进程消失之后它自己就好。
+async fn serve(state: &Shared) {
+    reap(state);
+    if state.lock().unwrap().cfg.enabled {
+        let _ = start(state).await;
+    }
+}
+
+/// 监听任务已经退出（serve 报错或 panic）时摘掉句柄、把原因留在 error 里，
+/// 下一轮 start() 才会在端口空出来之后重新绑上。
+fn reap(state: &Shared) {
+    let mut rt = state.lock().unwrap();
+    let dead = matches!(&rt.server, Some((_, join)) if join.is_finished());
+    if !dead {
+        return;
+    }
+    rt.server = None;
+    let fail = rt.serve_fail.lock().unwrap().take();
+    let old = rt.error.take();
+    let reason = fail.or(old).unwrap_or_else(|| "监听任务已退出".to_string());
+    rt.error = Some(reason);
+}
+
+/// 自己没在监听、却有另一个进程报「我在监听」时该安静退出（两个后台进程几乎同时起来
+/// 抢端口时，抢输的那个别用自己的失败心跳盖掉对方的状态）。
+fn peer_listens(state: &Shared) -> bool {
+    if matches!(&state.lock().unwrap().server, Some((_, join)) if !join.is_finished()) {
+        return false;
+    }
+    let path = heartbeat_path().ok();
+    path.and_then(|p| read_heartbeat_at(&p))
+        .is_some_and(|b| b.pid != std::process::id() && b.is_live(now_secs()) && b.listening)
+}
+
+/// 把 mcp.json 的改动落到运行态：令牌直接换、端口重绑、开关关掉就整体退出。
+/// 返回 false 表示服务已被关掉，主循环该收工。
+async fn reload(state: &Shared) -> bool {
+    let (path, prev) = {
+        let rt = state.lock().unwrap();
+        (rt.cfg_file.clone(), rt.cfg.clone())
+    };
+    // 读不到就当这一秒什么都没变：一个写坏的配置文件不该把在跑的服务带倒
+    let next = match load_config(&path) {
+        Ok(cfg) => cfg,
+        Err(_) => return true,
+    };
+    if next.token != prev.token {
+        *state.lock().unwrap().token.write().unwrap() = next.token.clone();
+    }
+    let port_changed = next.port != prev.port;
+    let enabled = next.enabled;
+    state.lock().unwrap().cfg = next;
+    if !enabled {
+        stop(state).await;
+        return false;
+    }
+    if port_changed {
+        stop(state).await;
+    }
+    serve(state).await;
+    true
+}
+
+fn write_heartbeat(state: &Shared) {
+    let beat = heartbeat_of(&state.lock().unwrap());
+    if let (Ok(path), Ok(text)) = (heartbeat_path(), serde_json::to_string(&beat)) {
+        let _ = daemon::write_atomic(&path, &text);
+    }
+}
+
+/// 心跳内容直接从运行态算：任务起来了又死掉（panic 或 serve 出错）时不能继续报「监听中」，
+/// 那会让界面上绿字、端口上没人。
+fn heartbeat_of(rt: &Runtime) -> Heartbeat {
     let task_err = match &rt.server {
         Some((_, join)) if join.is_finished() => Some(
             rt.serve_fail
@@ -267,45 +524,19 @@ fn status_of(rt: &Runtime) -> Status {
         ),
         _ => None,
     };
-    let running = matches!(&rt.server, Some((_, join)) if !join.is_finished());
-    Status {
-        enabled: rt.cfg.enabled,
-        running,
+    Heartbeat {
+        pid: std::process::id(),
         port: rt.cfg.port,
-        token: rt.cfg.token.clone(),
-        url: format!("http://127.0.0.1:{}/mcp", rt.cfg.port),
-        config_file: rt.cfg_file.display().to_string(),
+        listening: matches!(&rt.server, Some((_, join)) if !join.is_finished()),
         error: rt.error.clone().or(task_err),
-        agents: rt
-            .agents
-            .lock()
-            .unwrap()
-            .values()
-            .map(|a| {
-                let g = a.buf.lock().unwrap();
-                AgentInfo {
-                    terminal_id: a.terminal_id.clone(),
-                    session_name: a.session_name.clone(),
-                    host: a.host.clone(),
-                    closed: g.closed.is_some(),
-                    out_bytes: g.total,
-                    last_command: g.last_command.clone(),
-                }
-            })
-            .collect(),
+        at: now_secs(),
+        agents: status_of_agents(&rt.agents),
     }
 }
 
-pub async fn status(state: &Shared) -> Status {
-    status_of(&state.lock().unwrap())
-}
-
-/// 按上次落盘的开关在启动时拉起服务。
-pub async fn boot(state: &Shared) {
-    let enabled = state.lock().unwrap().cfg.enabled;
-    if enabled {
-        let _ = start(state).await;
-    }
+fn read_heartbeat_at(path: &Path) -> Option<Heartbeat> {
+    let text = std::fs::read_to_string(path).ok()?;
+    serde_json::from_str::<Heartbeat>(&text).ok()
 }
 
 async fn start(state: &Shared) -> Result<(), String> {
@@ -382,54 +613,6 @@ async fn stop(state: &Shared) {
     }
 }
 
-/// 配置改动落盘，再按新配置重启监听（开关和端口得重开，令牌不用）。
-async fn apply(state: &Shared) -> Result<Status, String> {
-    let (enabled, cfg, cfg_file) = {
-        let rt = state.lock().unwrap();
-        (rt.cfg.enabled, rt.cfg.clone(), rt.cfg_file.clone())
-    };
-    save_config(&cfg, &cfg_file)?;
-    stop(state).await;
-    if enabled {
-        start(state).await?;
-    }
-    Ok(status_of(&state.lock().unwrap()))
-}
-
-pub async fn set_enabled(state: &Shared, enabled: bool) -> Result<Status, String> {
-    state.lock().unwrap().cfg.enabled = enabled;
-    match apply(state).await {
-        Ok(st) => Ok(st),
-        Err(e) => {
-            // 起不来就把开关落回关闭，别让界面显示"已开"却根本没在监听
-            state.lock().unwrap().cfg.enabled = false;
-            let _ = apply(state).await;
-            Err(e)
-        }
-    }
-}
-
-pub async fn set_port(state: &Shared, port: u16) -> Result<Status, String> {
-    if port < 1024 {
-        return Err("端口要大于等于 1024".into());
-    }
-    state.lock().unwrap().cfg.port = port;
-    apply(state).await
-}
-
-/// 换令牌只改内存里的共享单元和 mcp.json，不重启监听：鉴权是逐请求现读的，
-/// 重绑同一个端口反而会被刚关闭的套接字挡住。
-pub async fn rotate_token(state: &Shared) -> Result<Status, String> {
-    let (cfg, cfg_file) = {
-        let mut rt = state.lock().unwrap();
-        rt.cfg.token = random_hex(16);
-        *rt.token.write().unwrap() = rt.cfg.token.clone();
-        (rt.cfg.clone(), rt.cfg_file.clone())
-    };
-    save_config(&cfg, &cfg_file)?;
-    Ok(status_of(&state.lock().unwrap()))
-}
-
 /// 只认 `Authorization: Bearer <token>`。虽然绑在回环上，本机其它进程照样连得上，
 /// 这一层不能省。
 async fn guard(
@@ -440,17 +623,19 @@ async fn guard(
 ) -> Result<Response, StatusCode> {
     // 现读：重新生成令牌之后不用重启监听，下一个请求就用新值判
     let token = cell.read().unwrap().clone();
-    let raw = headers
-        .get(axum::http::header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .unwrap_or("");
-    // 各家客户端都发 `Bearer <token>`，容忍裸 token 免得撞上一个不规范的
-    let given = raw.strip_prefix("Bearer ").unwrap_or(raw);
-    if !given.is_empty() && given == token {
+    if bearer_ok(headers.get(axum::http::header::AUTHORIZATION), &token) {
         Ok(next.run(req).await)
     } else {
         Err(StatusCode::UNAUTHORIZED)
     }
+}
+
+/// 各家客户端都发 `Bearer <token>`，容忍裸 token 免得撞上一个不规范的；
+/// 空值一律拒，别让「没带鉴权头」和一个恰好为空的令牌等价。
+fn bearer_ok(header: Option<&axum::http::HeaderValue>, token: &str) -> bool {
+    let raw = header.and_then(|v| v.to_str().ok()).unwrap_or("");
+    let given = raw.strip_prefix("Bearer ").unwrap_or(raw);
+    !given.is_empty() && given == token
 }
 
 // ------------------------------------------------------------------ MCP 工具
@@ -1067,5 +1252,329 @@ mod tests {
         let (tail, next, _) = agent.read_from(total - 3);
         assert_eq!(tail, "xxx");
         assert_eq!(next, total);
+    }
+
+    #[test]
+    fn bearer_check_takes_prefixed_or_bare_tokens_only() {
+        fn h(v: &str) -> Option<axum::http::HeaderValue> {
+            axum::http::HeaderValue::from_str(v).ok()
+        }
+        assert!(bearer_ok(h("Bearer abc").as_ref(), "abc"));
+        assert!(bearer_ok(h("abc").as_ref(), "abc"), "容忍裸令牌");
+        assert!(!bearer_ok(h("Bearer wrong").as_ref(), "abc"));
+        assert!(!bearer_ok(None, "abc"), "没带鉴权头要拒");
+        assert!(
+            !bearer_ok(h("").as_ref(), "abc"),
+            "空值不能和一个恰好为空的令牌等价"
+        );
+        assert!(
+            !bearer_ok(h("Bearer ").as_ref(), ""),
+            "令牌为空时不该有能过鉴权的写法"
+        );
+    }
+
+    /// 心跳里写的是实际绑上的端口：界面只信 mcp.json 会把 agent 指到一个没人听的端口
+    #[test]
+    fn status_follows_a_live_heartbeat() {
+        let dir = case_dir("live");
+        let cfg = dir.join("mcp.json");
+        let hb = dir.join("mcpd.json");
+        save_config(
+            &Config {
+                enabled: true,
+                port: DEFAULT_PORT,
+                token: "abc".into(),
+            },
+            &cfg,
+        )
+        .unwrap();
+        let beat = Heartbeat {
+            pid: 4321,
+            port: 40001,
+            listening: true,
+            error: None,
+            at: now_secs(),
+            agents: vec![AgentInfo {
+                terminal_id: "mcp-1".into(),
+                session_name: "web-1".into(),
+                host: "10.0.0.1:22".into(),
+                closed: false,
+                out_bytes: 12,
+                last_command: "uname -a".into(),
+            }],
+        };
+        daemon::write_atomic(&hb, &serde_json::to_string(&beat).unwrap()).unwrap();
+
+        let st = status_at(&cfg, &hb);
+        assert!(st.running, "心跳新鲜又在监听就该报在监听");
+        assert_eq!(st.port, 40001, "端口跟着心跳走，不能停在配置里的默认值");
+        assert_eq!(st.url, "http://127.0.0.1:40001/mcp");
+        assert_eq!(st.agents.len(), 1, "agent 会话列表由心跳带回来");
+        assert_eq!(
+            st.token, "abc",
+            "令牌只从 mcp.json 读，心跳文件里不该有一份"
+        );
+        assert_eq!(st.error, None);
+        cleanup(&dir);
+    }
+
+    /// 后台进程被杀之后心跳文件还留在原地：越过 STALE_SECS 就不能再信
+    #[test]
+    fn stale_heartbeat_falls_back_to_the_configured_port() {
+        let dir = case_dir("stale");
+        let cfg = dir.join("mcp.json");
+        let hb = dir.join("mcpd.json");
+        save_config(
+            &Config {
+                enabled: true,
+                port: DEFAULT_PORT,
+                token: "abc".into(),
+            },
+            &cfg,
+        )
+        .unwrap();
+        let beat = Heartbeat {
+            pid: 4321,
+            port: 40001,
+            listening: true,
+            error: None,
+            at: now_secs() - daemon::STALE_SECS - 1,
+            agents: vec![AgentInfo {
+                terminal_id: "mcp-1".into(),
+                session_name: "web-1".into(),
+                host: "10.0.0.1:22".into(),
+                closed: false,
+                out_bytes: 12,
+                last_command: String::new(),
+            }],
+        };
+        daemon::write_atomic(&hb, &serde_json::to_string(&beat).unwrap()).unwrap();
+
+        let st = status_at(&cfg, &hb);
+        assert!(
+            !st.running,
+            "心跳过期就报没在监听，哪怕文件里写着 listening"
+        );
+        assert!(st.enabled, "开关状态来自配置，与进程死活无关");
+        assert_eq!(st.port, DEFAULT_PORT, "没有活的进程时回落到配置里的端口");
+        assert!(
+            st.agents.is_empty(),
+            "别把上一个进程的 agent 会话算到当前状态上"
+        );
+        cleanup(&dir);
+    }
+
+    /// 端口被别的进程占了：进程活着但没在监听，原因必须上界面，别静默显示绿字
+    #[test]
+    fn live_but_not_listening_shows_the_reason() {
+        let dir = case_dir("busy");
+        let cfg = dir.join("mcp.json");
+        let hb = dir.join("mcpd.json");
+        save_config(
+            &Config {
+                enabled: true,
+                port: DEFAULT_PORT,
+                token: "abc".into(),
+            },
+            &cfg,
+        )
+        .unwrap();
+        let beat = Heartbeat {
+            pid: 4321,
+            port: DEFAULT_PORT,
+            listening: false,
+            error: Some("监听 127.0.0.1:39117 失败: os error 10048".into()),
+            at: now_secs(),
+            agents: vec![],
+        };
+        daemon::write_atomic(&hb, &serde_json::to_string(&beat).unwrap()).unwrap();
+
+        let st = status_at(&cfg, &hb);
+        assert!(!st.running);
+        let err = st.error.expect("端口冲突的原因要带给界面");
+        assert!(err.contains("10048"), "{err}");
+        cleanup(&dir);
+    }
+
+    /// 换令牌不重绑端口：旧令牌立刻失效、新令牌能过鉴权。
+    /// 重绑反而会被刚关闭的套接字挡住（os error 10048），这条是「免重启」设计的落点。
+    #[tokio::test]
+    async fn rotated_token_takes_effect_without_rebinding_the_port() {
+        let dir = case_dir("rotate");
+        let cfg = dir.join("mcp.json");
+        let port = free_port();
+        save_config(
+            &Config {
+                enabled: true,
+                port,
+                token: "old".into(),
+            },
+            &cfg,
+        )
+        .unwrap();
+        let state = new_manager_at(crate::terminal::new_manager(), cfg.clone());
+        start(&state).await.expect("起监听");
+
+        let url = format!("http://127.0.0.1:{port}/mcp");
+        let http = reqwest::Client::new();
+        let denied = http
+            .get(&url)
+            .bearer_auth("wrong")
+            .send()
+            .await
+            .unwrap()
+            .status();
+        assert_eq!(
+            denied,
+            StatusCode::UNAUTHORIZED,
+            "错误令牌要挡在鉴权中间件外"
+        );
+
+        // 走真路径：界面只改文件，后台进程那一轮 reload 把它读进来
+        save_config(
+            &Config {
+                enabled: true,
+                port,
+                token: "new".into(),
+            },
+            &cfg,
+        )
+        .unwrap();
+        assert!(reload(&state).await, "只换令牌不该让主循环收工");
+        assert!(
+            matches!(&state.lock().unwrap().server, Some((_, join)) if !join.is_finished()),
+            "端口没改就不该停掉监听任务"
+        );
+
+        let still_old = http
+            .get(&url)
+            .bearer_auth("old")
+            .send()
+            .await
+            .unwrap()
+            .status();
+        assert_eq!(
+            still_old,
+            StatusCode::UNAUTHORIZED,
+            "换完之后旧令牌立刻失效"
+        );
+        let accepted = http
+            .get(&url)
+            .bearer_auth("new")
+            .send()
+            .await
+            .unwrap()
+            .status();
+        assert_ne!(
+            accepted,
+            StatusCode::UNAUTHORIZED,
+            "新令牌该穿过鉴权中间件落到 MCP 路由"
+        );
+
+        stop(&state).await;
+        cleanup(&dir);
+    }
+
+    /// 改端口要停掉旧监听再绑新的：旧端口必须真还回来，否则重绑撞 10048
+    #[tokio::test]
+    async fn port_change_moves_the_listener() {
+        let dir = case_dir("port");
+        let cfg = dir.join("mcp.json");
+        let first = free_port();
+        let second = free_port();
+        save_config(
+            &Config {
+                enabled: true,
+                port: first,
+                token: "abc".into(),
+            },
+            &cfg,
+        )
+        .unwrap();
+        let state = new_manager_at(crate::terminal::new_manager(), cfg.clone());
+        start(&state).await.expect("起监听");
+        assert!(
+            std::net::TcpListener::bind(("127.0.0.1", first)).is_err(),
+            "测试前提：旧端口该被监听占着"
+        );
+
+        save_config(
+            &Config {
+                enabled: true,
+                port: second,
+                token: "abc".into(),
+            },
+            &cfg,
+        )
+        .unwrap();
+        assert!(reload(&state).await);
+        assert!(
+            std::net::TcpListener::bind(("127.0.0.1", first)).is_ok(),
+            "旧端口该还回来"
+        );
+        let beat = heartbeat_of(&state.lock().unwrap());
+        assert!(beat.listening, "新端口该已经绑上");
+        assert_eq!(beat.port, second, "心跳要报实际在听的端口");
+
+        stop(&state).await;
+        cleanup(&dir);
+    }
+
+    /// 关掉开关：主循环收到「收工」，监听停、端口还回来
+    #[tokio::test]
+    async fn turning_the_switch_off_stops_serving() {
+        let dir = case_dir("off");
+        let cfg = dir.join("mcp.json");
+        let port = free_port();
+        save_config(
+            &Config {
+                enabled: true,
+                port,
+                token: "abc".into(),
+            },
+            &cfg,
+        )
+        .unwrap();
+        let state = new_manager_at(crate::terminal::new_manager(), cfg.clone());
+        start(&state).await.expect("起监听");
+
+        save_config(
+            &Config {
+                enabled: false,
+                port,
+                token: "abc".into(),
+            },
+            &cfg,
+        )
+        .unwrap();
+        assert!(!reload(&state).await, "开关关掉要告诉主循环可以退出");
+        assert!(state.lock().unwrap().server.is_none(), "监听任务该摘干净");
+        assert!(
+            std::net::TcpListener::bind(("127.0.0.1", port)).is_ok(),
+            "端口该还给用户"
+        );
+        cleanup(&dir);
+    }
+
+    /// 找一个暂时空闲的端口给测试用
+    fn free_port() -> u16 {
+        let l = std::net::TcpListener::bind(("127.0.0.1", 0)).expect("找不到空闲端口");
+        let port = l.local_addr().expect("读不到端口").port();
+        drop(l);
+        port
+    }
+
+    fn case_dir(tag: &str) -> PathBuf {
+        let dir = std::env::temp_dir().join(format!(
+            "onecrt-mcp-{}-{tag}-{}",
+            std::process::id(),
+            random_hex(4)
+        ));
+        std::fs::create_dir_all(&dir).expect("建临时目录失败");
+        dir
+    }
+
+    fn cleanup(dir: &Path) {
+        let _ = std::fs::remove_dir_all(dir);
     }
 }

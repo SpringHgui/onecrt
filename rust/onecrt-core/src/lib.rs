@@ -3,6 +3,7 @@
 //! 这里不依赖任何 GUI 框架；界面层通过 [`Backend`] 持有一份 tokio 运行时与几个
 //! `Arc<Mutex<…>>` 管理器，把结果经回调/通道送回自己的事件循环。
 
+pub mod daemon;
 pub mod files;
 pub mod import;
 pub mod mcp;
@@ -13,7 +14,6 @@ pub mod stats;
 pub mod terminal;
 
 use std::io;
-use std::sync::Arc;
 
 /// 界面层唯一需要持有的东西：一个 tokio 运行时 + 各管理器。
 pub struct Backend {
@@ -21,7 +21,6 @@ pub struct Backend {
     pub terminals: terminal::Shared,
     pub files: files::Shared,
     pub stats: stats::Shared,
-    pub mcp: mcp::Shared,
 }
 
 impl Backend {
@@ -33,13 +32,11 @@ impl Backend {
         let terminals = terminal::new_manager();
         let files = files::new_manager();
         let stats = stats::new_manager();
-        let mcp = mcp::new_manager(terminals.clone());
         Ok(Backend {
             rt,
             terminals,
             files,
             stats,
-            mcp,
         })
     }
 
@@ -58,11 +55,11 @@ impl Backend {
     }
 }
 
-/// MCP 服务按上次落盘的开关在启动时自恢复
-pub fn boot_mcp(backend: Arc<Backend>, notify: impl Fn() + Send + Sync + 'static) {
-    let mcp = backend.mcp.clone();
+/// 后台 MCP 服务按上次落盘的开关自恢复：补齐开机自启登记，没在跑就拉起后台进程。
+/// 界面不监听端口，所以这里只动文件和进程，不碰 [`Backend`] 里的运行时状态。
+pub fn boot_daemon(backend: &Backend, notify: impl Fn() + Send + 'static) {
     backend.spawn(async move {
-        mcp::boot(&mcp).await;
+        let _ = mcp::boot();
         notify();
     });
 }
