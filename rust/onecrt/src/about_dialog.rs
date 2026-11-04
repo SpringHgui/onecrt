@@ -159,7 +159,7 @@ fn check_for_update(me: AnyWindowHandle, parent: AnyWindowHandle, cx: &mut App, 
             Ok(Some(latest)) => {
                 let _ = me.update(cx, |_, window, _| window.remove_window());
                 dialog_window::run_after_close(parent, cx, move |window, cx| {
-                    show_update(window, cx, lang, &current, latest)
+                    show_update(window, cx, lang, latest)
                 });
             }
             Err(error) => {
@@ -180,51 +180,151 @@ fn notify(parent: AnyWindowHandle, cx: &mut App, note: Notification) {
     let _ = parent.update(cx, |_, window, cx| window.push_notification(note, cx));
 }
 
-fn show_update(
-    window: &mut Window,
-    cx: &mut App,
-    lang: Lang,
-    current: &str,
-    latest: update::Latest,
-) {
-    let url = std::rc::Rc::new(latest.url);
-    let version = latest.version;
-    let title = tr(lang, "发现新版本", "Update available");
-    let heading: SharedString = if lang == Lang::Zh {
-        format!("OneCRT v{version} 已发布").into()
-    } else {
-        format!("OneCRT v{version} is out").into()
+fn show_update(window: &mut Window, cx: &mut App, lang: Lang, latest: update::Latest) {
+    // 只有拿得到本平台安装包、并且能静默安装时才自动更新；否则退回「打开下载页」
+    let auto = update::can_auto_install() && latest.asset.is_some();
+    let version = latest.version.clone();
+    let url = std::rc::Rc::new(latest.url.clone());
+    let status: SharedString = match (auto, lang) {
+        (true, Lang::Zh) => format!("正在下载 OneCRT v{version}…").into(),
+        (true, Lang::En) => format!("Downloading OneCRT v{version}…").into(),
+        (false, Lang::Zh) => {
+            format!("OneCRT v{version} 已发布，当前平台请到发布页下载安装。").into()
+        }
+        (false, Lang::En) => {
+            format!("OneCRT v{version} is out; download it from the release page on this platform.")
+                .into()
+        }
     };
-    let detail: SharedString = if lang == Lang::Zh {
-        format!("当前运行 v{current}。到发布页下载新包，替换后重启即可；本版本不提供自动安装。")
-            .into()
-    } else {
-        format!(
-            "You are running v{current}. Download the new build from the release page and restart after replacing it; this build does not self-install."
-        )
-        .into()
-    };
-    dialog_window::open(window, cx, title, 420., 200., move |_, cx| {
-        cx.new(|_| UpdateWindow {
-            lang,
-            heading,
-            detail,
-            url,
-        })
-    });
+    dialog_window::open(
+        window,
+        cx,
+        tr(lang, "发现新版本", "Update available"),
+        420.,
+        176.,
+        move |_, cx| {
+            let entity = cx.new(|_| UpdateWindow {
+                lang,
+                version: version.clone(),
+                status: status.clone(),
+                url,
+                phase: if auto { Phase::Working } else { Phase::Manual },
+                task: None,
+            });
+            if auto {
+                entity.update(cx, |this, cx| this.start(latest, cx));
+            }
+            entity
+        },
+    );
+}
+
+#[derive(Clone, Copy, PartialEq)]
+enum Phase {
+    /// 下载 / 安装进行中
+    Working,
+    /// 装完了，马上重启
+    Restarting,
+    /// 出错，只能手动下载
+    Failed,
+    /// 这个平台不做自动安装
+    Manual,
 }
 
 struct UpdateWindow {
     lang: Lang,
-    heading: SharedString,
-    detail: SharedString,
+    version: String,
+    status: SharedString,
     url: std::rc::Rc<String>,
+    phase: Phase,
+    task: Option<gpui::Task<()>>,
+}
+
+impl UpdateWindow {
+    fn start(&mut self, latest: update::Latest, cx: &mut Context<Self>) {
+        let (tx, rx) = async_channel::bounded(1);
+        std::thread::spawn(move || {
+            let _ = tx.send_blocking(update::download(&latest));
+        });
+        self.task = Some(cx.spawn(async move |this, cx| {
+            let Ok(downloaded) = rx.recv().await else {
+                return;
+            };
+            let setup = match downloaded {
+                Ok(path) => path,
+                Err(error) => {
+                    let _ = this.update(cx, |this, cx| this.fail(error, cx));
+                    return;
+                }
+            };
+            // install 只负责把安装程序挂到本进程退出之后，返回很快
+            let spawned = update::install(&setup);
+            let ok = this
+                .update(cx, |this, cx| match spawned {
+                    Ok(()) => {
+                        this.phase = Phase::Restarting;
+                        this.status = if this.lang == Lang::Zh {
+                            format!("正在安装 OneCRT v{}，装完会自动重启。", this.version).into()
+                        } else {
+                            format!(
+                                "Installing OneCRT v{}, it will restart automatically…",
+                                this.version
+                            )
+                            .into()
+                        };
+                        cx.notify();
+                        true
+                    }
+                    Err(error) => {
+                        this.fail(error, cx);
+                        false
+                    }
+                })
+                .unwrap_or(false);
+            if ok {
+                // 让状态文字画出来再退出，安装程序在本进程消失后才动手
+                cx.background_executor()
+                    .timer(std::time::Duration::from_millis(900))
+                    .await;
+                cx.update(|cx| cx.quit());
+            }
+        }));
+    }
+
+    fn fail(&mut self, error: String, cx: &mut Context<Self>) {
+        self.phase = Phase::Failed;
+        self.status = if self.lang == Lang::Zh {
+            format!("自动更新失败：{error}").into()
+        } else {
+            format!("Automatic update failed: {error}").into()
+        };
+        cx.notify();
+    }
 }
 
 impl Render for UpdateWindow {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let lang = self.lang;
         let url = self.url.clone();
+        let title: SharedString = if lang == Lang::Zh {
+            format!("OneCRT v{} 已发布", self.version).into()
+        } else {
+            format!("OneCRT v{} is out", self.version).into()
+        };
+        let mut footer = dialog_window::buttons();
+        if !matches!(self.phase, Phase::Working | Phase::Restarting) {
+            footer = footer.child(
+                Button::new("update-open")
+                    .primary()
+                    .label(tr(lang, "打开下载页", "Open download page"))
+                    .on_click(move |_, _, cx| cx.open_url(&url)),
+            );
+        }
+        footer = footer.child(
+            Button::new("update-close")
+                .label(tr(lang, "关闭", "Close"))
+                .on_click(|_, window, _| window.remove_window()),
+        );
         dialog_window::page(
             cx,
             div()
@@ -235,26 +335,15 @@ impl Render for UpdateWindow {
                     div()
                         .text_size(px(13.))
                         .font_weight(gpui::FontWeight::SEMIBOLD)
-                        .child(self.heading.clone()),
+                        .child(title),
                 )
                 .child(
                     div()
                         .text_size(px(12.))
                         .text_color(cx.theme().muted_foreground)
-                        .child(self.detail.clone()),
+                        .child(self.status.clone()),
                 ),
-            dialog_window::buttons()
-                .child(
-                    Button::new("update-close")
-                        .label(tr(lang, "关闭", "Close"))
-                        .on_click(|_, window, _| window.remove_window()),
-                )
-                .child(
-                    Button::new("update-open")
-                        .primary()
-                        .label(tr(lang, "打开下载页", "Open download page"))
-                        .on_click(move |_, _, cx| cx.open_url(&url)),
-                ),
+            footer,
         )
     }
 }
