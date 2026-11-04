@@ -4,12 +4,12 @@ use gpui_kit as gpui;
 
 use gpui::{
     div, px, AnyWindowHandle, App, AppContext, Context, IntoElement, ParentElement, Render,
-    SharedString, Styled, Window,
+    SharedString, Styled, WeakEntity, Window,
 };
 use gpui_kit::component::{
     button::{Button, ButtonVariants},
     notification::Notification,
-    ActiveTheme, WindowExt,
+    ActiveTheme, Sizable, WindowExt,
 };
 
 use crate::dialog_window;
@@ -26,19 +26,28 @@ pub fn open_about(window: &mut Window, cx: &mut App, lang: Lang) {
         tr(lang, "关于 OneCRT", "About OneCRT"),
         460.,
         352.,
-        move |_, cx| cx.new(|_| AboutWindow { lang, parent }),
+        move |_, cx| {
+            cx.new(|_| AboutWindow {
+                lang,
+                parent,
+                checking: false,
+            })
+        },
     );
 }
 
 struct AboutWindow {
     lang: Lang,
     parent: AnyWindowHandle,
+    /// 请求在飞的时候按钮转圈并锁住，免得连点重复请求
+    checking: bool,
 }
 
 impl Render for AboutWindow {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let lang = self.lang;
         let parent = self.parent;
+        let about = cx.entity().downgrade();
         let theme = cx.theme();
         let fg = theme.foreground;
         let muted = theme.muted_foreground;
@@ -113,14 +122,32 @@ impl Render for AboutWindow {
                         .child(SharedString::from(format!("{REPO}"))),
                 ),
             dialog_window::buttons()
-                .child(
-                    Button::new("about-update")
-                        .label(tr(lang, "检查更新", "Check for updates"))
-                        .on_click(move |_, window, cx| {
-                            let me = window.window_handle();
-                            check_for_update(me, parent, cx, lang);
-                        }),
-                )
+                .child({
+                    let mut check = Button::new("about-update")
+                        .loading(self.checking)
+                        .label(if self.checking {
+                            tr(lang, "检查中…", "Checking…")
+                        } else {
+                            tr(lang, "检查更新", "Check for updates")
+                        });
+                    // Button 自带的 loading 只在有 icon 时才换成转圈，这里没有 icon，
+                    // 手动挂一个 Spinner，否则按下去只剩整颗按钮淡一点
+                    if self.checking {
+                        check = check.child(
+                            gpui::component::spinner::Spinner::new()
+                                .with_size(gpui::component::Size::Small),
+                        );
+                    }
+                    check.on_click(move |_, window, cx| {
+                        let me = window.window_handle();
+                        let about = about.clone();
+                        let _ = about.update(cx, |this, cx| {
+                            this.checking = true;
+                            cx.notify();
+                        });
+                        check_for_update(me, parent, about, cx, lang);
+                    })
+                })
                 .child(
                     Button::new("about-repo")
                         .label(tr(lang, "项目主页", "Project home"))
@@ -136,7 +163,13 @@ impl Render for AboutWindow {
     }
 }
 
-fn check_for_update(me: AnyWindowHandle, parent: AnyWindowHandle, cx: &mut App, lang: Lang) {
+fn check_for_update(
+    me: AnyWindowHandle,
+    parent: AnyWindowHandle,
+    about: WeakEntity<AboutWindow>,
+    cx: &mut App,
+    lang: Lang,
+) {
     let (tx, rx) = async_channel::bounded(1);
     let current = env!("CARGO_PKG_VERSION").to_string();
     let probe = current.clone();
@@ -154,6 +187,7 @@ fn check_for_update(me: AnyWindowHandle, parent: AnyWindowHandle, cx: &mut App, 
                 } else {
                     format!("You are up to date (v{current})").into()
                 };
+                finish_check(&about, cx);
                 notify(parent, cx, Notification::success(message));
             }
             Ok(Some(latest)) => {
@@ -168,11 +202,20 @@ fn check_for_update(me: AnyWindowHandle, parent: AnyWindowHandle, cx: &mut App, 
                 } else {
                     format!("Update check failed: {error}").into()
                 };
+                finish_check(&about, cx);
                 notify(parent, cx, Notification::error(message));
             }
         });
     })
     .detach();
+}
+
+/// 检查结束但没弹出新版本窗口时，把按钮从“检查中…”恢复成可点。
+fn finish_check(about: &WeakEntity<AboutWindow>, cx: &mut App) {
+    let _ = about.update(cx, |this, cx| {
+        this.checking = false;
+        cx.notify();
+    });
 }
 
 /// 通知要落在主窗口上：弹窗窗口里没有通知层。
