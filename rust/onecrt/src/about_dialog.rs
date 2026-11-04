@@ -3,13 +3,13 @@
 use gpui_kit as gpui;
 
 use gpui::{
-    div, px, AnyWindowHandle, App, AppContext, Context, IntoElement, ParentElement, Render,
-    SharedString, Styled, WeakEntity, Window,
+    div, px, AnyWindowHandle, App, AppContext, Context, InteractiveElement, IntoElement,
+    ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, WeakEntity, Window,
 };
 use gpui_kit::component::{
     button::{Button, ButtonVariants},
     notification::Notification,
-    ActiveTheme, Sizable, WindowExt,
+    ActiveTheme, Icon, Sizable, WindowExt,
 };
 
 use crate::dialog_window;
@@ -17,7 +17,8 @@ use crate::dialog_window::ActionButton;
 use crate::i18n::{tr, Lang};
 use crate::update;
 
-const REPO: &str = "https://github.com/SpringHgui/onecrt";
+const GITHUB: &str = "https://github.com/SpringHgui/onecrt";
+const GITEE: &str = "https://gitee.com/SpringHgui/onecrt";
 
 pub fn open_about(window: &mut Window, cx: &mut App, lang: Lang) {
     let parent = window.window_handle();
@@ -56,6 +57,19 @@ impl Render for AboutWindow {
             .map(|p| p.join("shellx").to_string_lossy().into_owned())
             .unwrap_or_else(|| "—".into());
         let version = env!("CARGO_PKG_VERSION");
+        let repo_link = move |id: &'static str, url: &'static str, logo: &'static [u8]| {
+            div()
+                .id(id)
+                .flex()
+                .items_center()
+                .gap(px(6.))
+                .text_color(muted)
+                .cursor_pointer()
+                .hover(move |s| s.text_color(fg))
+                .child(Icon::default().data(logo).size(px(12.)).text_color(muted))
+                .child(url)
+                .on_click(move |_, _, cx| cx.open_url(url))
+        };
         dialog_window::page(
             cx,
             div()
@@ -103,24 +117,40 @@ impl Render for AboutWindow {
                     )),
                 )
                 .child(
-                    div().text_size(px(11.)).text_color(muted).child(tr(
-                        lang,
-                        "会话与命令保存在下面的数据目录；Windows 上口令经 DPAPI 加密后落盘，Linux 与 macOS 为明文。仅面向内网运维，请勿用于对外分发的机器。",
-                        "Sessions and commands live in the data directory below. Passwords are DPAPI-encrypted on Windows and plain text on Linux/macOS. Intended for internal ops only.",
-                    )),
-                )
-                .child(
                     div()
                         .flex()
                         .flex_col()
                         .gap(px(2.))
                         .text_size(px(11.))
                         .text_color(muted)
-                        .child(SharedString::from(format!(
-                            "{} {data_dir}",
-                            tr(lang, "数据目录", "Data directory")
-                        )))
-                        .child(SharedString::from(format!("{REPO}"))),
+                        .child({
+                            let dir = SharedString::from(data_dir.clone());
+                            div()
+                                .id("about-data-dir")
+                                .cursor_pointer()
+                                .hover(move |s| s.text_color(fg))
+                                .on_click(move |_, _, cx| cx.open_url(&dir))
+                                .child(SharedString::from(format!(
+                                    "{} {data_dir}",
+                                    tr(lang, "数据目录", "Data directory")
+                                )))
+                        })
+                        .child(
+                            div()
+                                .flex()
+                                .flex_col()
+                                .gap(px(3.))
+                                .child(repo_link(
+                                    "about-github",
+                                    GITHUB,
+                                    include_bytes!("../assets/github.svg"),
+                                ))
+                                .child(repo_link(
+                                    "about-gitee",
+                                    GITEE,
+                                    include_bytes!("../assets/gitee.svg"),
+                                )),
+                        ),
                 ),
             dialog_window::buttons()
                 .child({
@@ -150,12 +180,6 @@ impl Render for AboutWindow {
                         check_for_update(me, parent, about, cx, lang);
                     })
                 })
-                .child(
-                    Button::new("about-repo")
-                        .label(tr(lang, "项目主页", "Project home"))
-                        .action_height()
-                        .on_click(|_, _, cx| cx.open_url(REPO)),
-                )
                 .child(
                     Button::new("about-close")
                         .primary()
