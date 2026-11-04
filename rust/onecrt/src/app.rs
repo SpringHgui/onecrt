@@ -4128,7 +4128,7 @@ impl OneCrt {
             .overflow_hidden();
 
         if self.tabs.is_empty() {
-            return strip.child(div().flex_1()).child(tab_strip_button(&t, cx));
+            return strip;
         }
 
         for (i, tab) in self.tabs.iter().enumerate() {
@@ -4269,7 +4269,7 @@ impl OneCrt {
                 );
             strip = strip.child(strip_tab);
         }
-        strip.child(div().flex_1()).child(tab_strip_button(&t, cx))
+        strip
     }
 
     fn body(&self, cx: &mut Context<Self>) -> Div {
@@ -4742,23 +4742,6 @@ fn lock_label(label: &'static str, on: bool, t: &Theme) -> impl IntoElement {
     div()
         .text_color(if on { t.text } else { t.text_3.opacity(0.5) })
         .child(SharedString::from(label))
-}
-
-fn tab_strip_button(t: &Theme, cx: &mut Context<OneCrt>) -> impl IntoElement {
-    let th = t.clone();
-    div()
-        .id("tabs-fullscreen")
-        .size(px(24.))
-        .mb(px(5.))
-        .flex()
-        .items_center()
-        .justify_center()
-        .rounded(px(4.))
-        .text_color(t.text_3)
-        .cursor_pointer()
-        .hover(move |s| s.bg(th.bg_hover).text_color(th.text))
-        .on_click(cx.listener(|_this, _, window, _cx| window.toggle_fullscreen()))
-        .child(Icon::new(IconName::Expand).size(px(13.)))
 }
 
 fn menu_button(
