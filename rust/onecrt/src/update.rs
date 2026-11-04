@@ -103,14 +103,18 @@ pub fn download(latest: &Latest) -> Result<PathBuf, String> {
 pub fn install(setup: &Path) -> Result<(), String> {
     use std::os::windows::process::CommandExt;
 
-    let exe = install_exe();
+    // 整段命令不能直接塞进 `cmd /c`：Rust 会把内嵌引号转义成 `\"`，cmd 不认这种转义，
+    // start 报“文件名、目录名或卷标语法不正确”。另外脚本里的中文路径要靠 chcp 65001
+    // 才能按 UTF-8 解出来。
     let script = format!(
-        "ping -n 3 127.0.0.1 >nul & start \"\" /wait \"{}\" /SP- /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS & start \"\" \"{}\"",
+        "@echo off\r\nchcp 65001 >nul\r\nping -n 3 127.0.0.1 >nul\r\nstart \"\" /wait \"{}\" /SP- /VERYSILENT /SUPPRESSMSGBOXES /NORESTART /CLOSEAPPLICATIONS\r\nstart \"\" \"{}\"\r\n",
         setup.display(),
-        exe.display()
+        install_exe().display()
     );
+    let bat = setup.with_file_name("onecrt-update.cmd");
+    std::fs::write(&bat, script.as_bytes()).map_err(|e| format!("写更新脚本失败：{e}"))?;
     std::process::Command::new("cmd")
-        .args(["/c", &script])
+        .args(["/c", &bat.to_string_lossy()])
         .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
         .spawn()
         .map_err(|e| format!("启动安装程序失败：{e}"))?;
