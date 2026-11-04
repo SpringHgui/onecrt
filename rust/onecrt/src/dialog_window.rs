@@ -43,7 +43,11 @@ pub fn open<V: Render + 'static>(
         is_minimizable: false,
         ..Default::default()
     };
-    if let Err(error) = cx.open_window(options, move |window, cx| build(window, cx)) {
+    if let Err(error) = cx.open_window(options, move |window, cx| {
+        let view = build(window, cx);
+        crate::theme::sync_native_titlebar(window, cx);
+        view
+    }) {
         eprintln!("打开弹窗失败: {error}");
     }
 }

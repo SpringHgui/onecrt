@@ -30,6 +30,7 @@ embed-resource = "3"
 raw-window-handle = "0.6"
 windows-sys = { version = "0.59", features = [
     "Win32_Foundation",
+    "Win32_Graphics_Dwm",
     "Win32_Graphics_Gdi",
     "Win32_UI_Input_KeyboardAndMouse",
     "Win32_UI_Shell",

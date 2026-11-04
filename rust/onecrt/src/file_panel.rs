@@ -9,15 +9,16 @@ use async_channel::{unbounded, Sender};
 use gpui_kit as gpui;
 
 use gpui::{
-    div, px, relative, AppContext, Context, CursorStyle, FocusHandle, InteractiveElement,
-    IntoElement, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent, ParentElement, Render,
-    SharedString, StatefulInteractiveElement, Styled, Window,
+    div, px, relative, AppContext, Context, CursorStyle, Entity, FocusHandle, Focusable,
+    InteractiveElement, IntoElement, KeyDownEvent, MouseButton, MouseDownEvent, MouseMoveEvent,
+    ParentElement, Render, SharedString, StatefulInteractiveElement, Styled, Subscription, Window,
 };
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{
     button::{Button, ButtonVariants},
+    input::{Input, InputEvent, InputState},
     menu::{DropdownMenu, PopupMenuItem},
-    Disableable, Icon,
+    Disableable, Icon, Sizable,
 };
 use onecrt_core::files::{self, Entry, OpenArgs, Progress};
 use onecrt_core::Backend;
@@ -32,6 +33,15 @@ use crate::theme::Theme;
 enum SideKind {
     Local,
     Remote,
+}
+
+impl SideKind {
+    fn index(self) -> usize {
+        match self {
+            Self::Local => 0,
+            Self::Remote => 1,
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -128,6 +138,17 @@ pub struct FilePanel {
     drag: Option<DragState>,
     transfers: Vec<TransferRow>,
     error: Option<String>,
+    /// 两侧地址栏的输入状态，渲染时才建（构造时拿不到 Window）
+    addr: [Option<Entity<InputState>>; 2],
+    /// 上一次写进地址栏的路径，用来判断后台列目录后是否需要回写
+    addr_shown: [Option<String>; 2],
+    /// 上一次设置过的占位符，切语言时用它判断要不要刷新
+    addr_ph: [Option<SharedString>; 2],
+    /// 用户正在地址栏里编辑：别用后台结果盖掉输入
+    addr_editing: [bool; 2],
+    /// 回车已提交、正等列表结果：失焦时不要把文字回滚成旧路径
+    addr_committed: [bool; 2],
+    _addr_subs: [Option<Subscription>; 2],
     /// 传输队列高度与本地栏宽度；由分隔条拖动改变，面板重建时保留。
     queue_h: f32,
     local_w: f32,
@@ -174,6 +195,12 @@ impl FilePanel {
             drag: None,
             transfers: Vec::new(),
             error: None,
+            addr: [None, None],
+            addr_shown: [None, None],
+            addr_ph: [None, None],
+            addr_editing: [false, false],
+            addr_committed: [false, false],
+            _addr_subs: [None, None],
             queue_h: 132.,
             local_w: 0.,
         };
@@ -188,6 +215,128 @@ impl FilePanel {
 
     pub fn set_lang(&mut self, lang: Lang, cx: &mut Context<Self>) {
         self.lang = lang;
+        cx.notify();
+    }
+
+    /// 地址栏输入框要 Window 才能建，所以第一次渲染时补上。
+    fn ensure_addr_inputs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        for side in [SideKind::Local, SideKind::Remote] {
+            let i = side.index();
+            if self.addr[i].is_some() {
+                continue;
+            }
+            let placeholder = Self::addr_placeholder(side, self.lang);
+            let initial = self.addr_target(side);
+            let state = cx.new(|cx| {
+                InputState::new(window, cx)
+                    .placeholder(placeholder.clone())
+                    .default_value(initial.clone())
+            });
+            self.addr_shown[i] = Some(initial);
+            self.addr_ph[i] = Some(placeholder);
+            self._addr_subs[i] = Some(cx.subscribe_in(
+                &state,
+                window,
+                move |this, input, event: &InputEvent, window, cx| match event {
+                    InputEvent::Focus => {
+                        this.focus = side;
+                        this.addr_editing[i] = true;
+                        input.update(cx, |state, cx| state.select_all(window, cx));
+                        cx.notify();
+                    }
+                    InputEvent::Blur => {
+                        this.addr_editing[i] = false;
+                        if std::mem::take(&mut this.addr_committed[i]) {
+                            cx.notify();
+                            return;
+                        }
+                        // 只是点了别处没回车：丢弃没提交的输入
+                        let target = this.addr_target(side);
+                        input.update(cx, |state, cx| state.set_value(target.clone(), window, cx));
+                        this.addr_shown[i] = Some(target);
+                        cx.notify();
+                    }
+                    InputEvent::PressEnter { .. } => {
+                        this.addr_editing[i] = false;
+                        this.addr_committed[i] = true;
+                        let raw = input.read(cx).value().to_string();
+                        this.go_from_addr(side, &raw, window, cx);
+                    }
+                    InputEvent::Change => {}
+                },
+            ));
+            self.addr[i] = Some(state);
+        }
+    }
+
+    /// 路径变了就回写地址栏；用户正在输入时不盖掉输入内容。
+    fn sync_addr_inputs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        for side in [SideKind::Local, SideKind::Remote] {
+            let i = side.index();
+            let Some(input) = self.addr[i].clone() else {
+                continue;
+            };
+            let placeholder = Self::addr_placeholder(side, self.lang);
+            if self.addr_ph[i].as_ref() != Some(&placeholder) {
+                input.update(cx, |state, cx| {
+                    state.set_placeholder(placeholder.clone(), window, cx)
+                });
+                self.addr_ph[i] = Some(placeholder);
+            }
+            if self.addr_editing[i] {
+                continue;
+            }
+            let target = self.addr_target(side);
+            if self.addr_shown[i].as_deref() == Some(target.as_str()) {
+                continue;
+            }
+            input.update(cx, |state, cx| state.set_value(target.clone(), window, cx));
+            self.addr_shown[i] = Some(target);
+        }
+    }
+
+    fn addr_focused(&self, window: &Window, cx: &Context<Self>) -> bool {
+        self.addr
+            .iter()
+            .flatten()
+            .any(|input| input.read(cx).focus_handle(cx).is_focused(window))
+    }
+
+    fn addr_placeholder(side: SideKind, lang: Lang) -> SharedString {
+        match side {
+            SideKind::Local => tr(lang, "此电脑", "This PC"),
+            SideKind::Remote => "—".into(),
+        }
+    }
+
+    /// 地址栏里显示的路径；远端没连上是空的（占位符画 "—"）。
+    fn addr_target(&self, side: SideKind) -> String {
+        match side {
+            SideKind::Local => self.local.path.clone(),
+            SideKind::Remote if self.remote_state == RemoteState::Ready => self.remote.path.clone(),
+            SideKind::Remote => String::new(),
+        }
+    }
+
+    /// 回车跳转：本地空串回「此电脑」，远端空串回根目录。
+    fn go_from_addr(
+        &mut self,
+        side: SideKind,
+        raw: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let path = raw.trim().trim_matches('"').trim().to_string();
+        self.focus = side;
+        match side {
+            SideKind::Local => self.list_local(path),
+            SideKind::Remote => {
+                if self.remote_state == RemoteState::Ready {
+                    self.list_remote(if path.is_empty() { "/".into() } else { path });
+                }
+            }
+        }
+        window.focus(&self.key_focus, cx);
         cx.notify();
     }
 
@@ -910,7 +1059,9 @@ fn fmt_date(mtime: Option<i64>) -> String {
 }
 
 impl Render for FilePanel {
-    fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        self.ensure_addr_inputs(window, cx);
+        self.sync_addr_inputs(window, cx);
         let t = self.theme.clone();
         let lang = self.lang;
 
@@ -1296,7 +1447,11 @@ impl Render for FilePanel {
             .bg(t.bg)
             .key_context("FilePanel")
             .track_focus(&key_focus)
-            .on_key_down(cx.listener(|this, ev: &KeyDownEvent, _, cx| {
+            .on_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| {
+                // 地址栏在编辑时 Ctrl+A 归输入框自己
+                if this.addr_focused(window, cx) {
+                    return;
+                }
                 let ks = &ev.keystroke;
                 if ks.modifiers.control && !ks.modifiers.alt && ks.key.eq_ignore_ascii_case("a") {
                     this.select_all(this.focus);
@@ -1542,7 +1697,8 @@ impl FilePanel {
             } else {
                 data.path.clone().into()
             };
-        let path_box = div()
+        let ready = side == SideKind::Local || self.remote_state == RemoteState::Ready;
+        let mut path_box = div()
             .h(px(22.))
             .flex_shrink_0()
             .mx(px(6.))
@@ -1555,10 +1711,23 @@ impl FilePanel {
             .border_color(t.border_strong)
             .overflow_hidden()
             .whitespace_nowrap()
-            .text_ellipsis()
             .text_size(px(11.))
-            .text_color(t.text_2)
-            .child(path_text);
+            .text_color(t.text_2);
+        path_box = match &self.addr[side.index()] {
+            Some(state) => path_box.child(
+                Input::new(state)
+                    .xsmall()
+                    .appearance(false)
+                    .bordered(false)
+                    .focus_bordered(false)
+                    .disabled(!ready)
+                    .text_size(px(11.))
+                    .text_color(t.text_2)
+                    .px(px(0.))
+                    .py(px(0.)),
+            ),
+            None => path_box.child(path_text),
+        };
 
         let mut crumb_row = div()
             .h(px(18.))

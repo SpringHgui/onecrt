@@ -317,6 +317,58 @@ pub fn sync_component(mode: Mode, cx: &mut gpui::App) {
     });
 }
 
+/// 弹窗用的是系统原生标题栏，gpui 建窗时按 Windows 的深浅色刷它，
+/// 「系统深色 + 应用浅色」就会让弹窗顶上一条深色标题栏。这里把它的
+/// 底色和文字色改写成当前主题。
+#[cfg(target_os = "windows")]
+pub fn sync_native_titlebar(window: &gpui::Window, cx: &gpui::App) {
+    use gpui_kit::component::ActiveTheme;
+    use raw_window_handle::{HasWindowHandle, RawWindowHandle};
+    use windows_sys::Win32::Graphics::Dwm::{
+        DwmSetWindowAttribute, DWMWA_CAPTION_COLOR, DWMWA_TEXT_COLOR, DWMWA_USE_IMMERSIVE_DARK_MODE,
+    };
+
+    let Ok(handle) = <gpui::Window as HasWindowHandle>::window_handle(window) else {
+        return;
+    };
+    let RawWindowHandle::Win32(win32) = handle.as_raw() else {
+        return;
+    };
+    let hwnd = win32.hwnd.get() as *mut core::ffi::c_void;
+
+    let theme = cx.theme();
+    // DWM 的 COLORREF 是 0x00BBGGRR
+    let colorref = |c: Hsla| {
+        let rgba = Rgba::from(c);
+        let byte = |v: f32| (v.clamp(0., 1.) * 255.).round() as u32;
+        (byte(rgba.b) << 16) | (byte(rgba.g) << 8) | byte(rgba.r)
+    };
+    let caption = colorref(theme.background);
+    let text = colorref(theme.foreground);
+    let immersive: i32 = if theme.is_dark() { 1 } else { 0 };
+
+    unsafe {
+        // 先定深浅色（管标题栏按钮的描色），再用显式颜色覆盖底色与文字色
+        DwmSetWindowAttribute(
+            hwnd,
+            DWMWA_USE_IMMERSIVE_DARK_MODE as u32,
+            &immersive as *const _ as _,
+            std::mem::size_of::<i32>() as u32,
+        );
+        for (attribute, value) in [(DWMWA_CAPTION_COLOR, caption), (DWMWA_TEXT_COLOR, text)] {
+            DwmSetWindowAttribute(
+                hwnd,
+                attribute as u32,
+                &value as *const _ as _,
+                std::mem::size_of::<u32>() as u32,
+            );
+        }
+    }
+}
+
+#[cfg(not(target_os = "windows"))]
+pub fn sync_native_titlebar(_window: &gpui::Window, _cx: &gpui::App) {}
+
 fn ansi_palette(dark: bool) -> [Rgb; 16] {
     let (red, yellow, green) = if dark {
         (0xf14c4c, 0xe2bb6f, 0x27bd51)

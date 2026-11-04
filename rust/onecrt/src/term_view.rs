@@ -49,7 +49,6 @@ pub enum Zoom {
 
 #[derive(Clone, Debug)]
 pub enum TabEvent {
-    Title,
     State,
     Reconnect,
     Zoom(Zoom),
@@ -73,6 +72,7 @@ struct Metrics {
 pub struct TerminalView {
     pub id: String,
     pub spec: ConnectSpec,
+    /// 页签/窗口标题固定为会话名，不跟随远端 OSC 0/2 标题
     pub title: SharedString,
     pub state: ConnState,
     engine: Rc<RefCell<Engine>>,
@@ -91,6 +91,8 @@ pub struct TerminalView {
     last_focused: Option<bool>,
     /// 状态栏光标位置：只在位置变化且距上次上报超过间隔时发事件
     last_cursor: Option<(usize, usize)>,
+    /// Ctrl+滚轮攒下的滚动量（行），满一格滚轮才走一步字号
+    zoom_accum: f32,
     last_cursor_emit: std::time::Instant,
     cursor_pending: bool,
     backend: Arc<onecrt_core::Backend>,
@@ -207,6 +209,7 @@ impl TerminalView {
             mouse_cell: None,
             last_focused: None,
             last_cursor: None,
+            zoom_accum: 0.,
             last_cursor_emit: std::time::Instant::now(),
             cursor_pending: false,
             backend,
@@ -273,7 +276,7 @@ impl TerminalView {
         cx.emit(TabEvent::Cursor);
     }
 
-    fn handle_term_event(&mut self, event: TermEvent, cx: &mut Context<Self>) {
+    fn handle_term_event(&mut self, event: TermEvent, _cx: &mut Context<Self>) {
         match event {
             TermEvent::ClipboardStore(text) => {
                 if let Ok(mut clip) = arboard::Clipboard::new() {
@@ -288,12 +291,6 @@ impl TerminalView {
                 }
             }
             TermEvent::PtyWrite(text) => self.write_bytes(text.into_bytes()),
-            TermEvent::Title(title) => {
-                if !title.is_empty() {
-                    self.title = title.into();
-                    cx.emit(TabEvent::Title);
-                }
-            }
             TermEvent::Bell => {}
         }
     }
@@ -308,7 +305,7 @@ impl TerminalView {
 
     fn cell_at_point(&self, pos: Point<Pixels>, bounds: Bounds<Pixels>) -> (usize, usize) {
         let m = self.metrics.borrow();
-        let x = (pos.x - bounds.origin.x).max(px(0.));
+        let x = (pos.x - bounds.origin.x - PAD_X).max(px(0.));
         let y = (pos.y - bounds.origin.y).max(px(0.));
         let col = (x / m.cell_w).floor() as usize;
         let row = (y / m.line_h).floor() as usize;
@@ -642,6 +639,23 @@ impl TerminalView {
         if lines == 0 {
             return;
         }
+        // Ctrl+滚轮调字号：攒够一格滚轮（3 行）才动一步，触控板的连续小增量
+        // 不会让字号一路飞掉；松开 Ctrl 就清零，免得下次按下先跳一格。
+        if ev.modifiers.control {
+            self.zoom_accum += lines as f32;
+            if self.zoom_accum.abs() >= 3. {
+                let zoom = if self.zoom_accum > 0. {
+                    Zoom::In
+                } else {
+                    Zoom::Out
+                };
+                self.zoom_accum = 0.;
+                cx.emit(TabEvent::Zoom(zoom));
+            }
+            cx.stop_propagation();
+            return;
+        }
+        self.zoom_accum = 0.;
         let mode = self.mode();
         if mode.contains(TermMode::MOUSE_MODE) {
             let b = if lines > 0 { 64 } else { 65 };
@@ -732,6 +746,9 @@ impl TerminalView {
     }
 }
 
+/// 终端网格与画布左右边缘的内边距；底色仍铺满整块画布。
+const PAD_X: Pixels = px(8.);
+
 fn cell_metrics(
     theme: &Theme,
     font_size: f32,
@@ -749,7 +766,7 @@ fn cell_metrics(
     let cell_w = cell_w.max(px(4.)).ceil();
     // 14px 字体约 16px 行距，和原版 xterm.js 的网格密度一致
     let line_h = px((font_size * 1.15).round());
-    let cols = ((width / cell_w).floor() as usize).max(2);
+    let cols = (((width - PAD_X * 2.).max(px(0.)) / cell_w).floor() as usize).max(2);
     let rows = ((height / line_h).floor() as usize).max(2);
     (cell_w, line_h, cols, rows)
 }
@@ -988,6 +1005,9 @@ fn paint_grid(
 
     window.paint_quad(fill(bounds, theme.term_bg));
 
+    // 网格整体右移一个内边距（顶/底贴边不变）
+    let grid_x = bounds.origin.x + PAD_X;
+
     let selection = engine.selection_screen();
     let cursor = engine.cursor();
     let colors = engine.term().colors();
@@ -1033,7 +1053,7 @@ fn paint_grid(
             if bg != rgb_of(theme.term_bg) {
                 window.paint_quad(fill(
                     Bounds::new(
-                        Point::new(bounds.origin.x + cell_w * col as f32, top),
+                        Point::new(grid_x + cell_w * col as f32, top),
                         gpui::size(cell_w * span as f32, line_h),
                     ),
                     bg_hsla,
@@ -1043,7 +1063,7 @@ fn paint_grid(
                 if sel.contains(row as i32, col) {
                     window.paint_quad(fill(
                         Bounds::new(
-                            Point::new(bounds.origin.x + cell_w * col as f32, top),
+                            Point::new(grid_x + cell_w * col as f32, top),
                             gpui::size(cell_w * span as f32, line_h),
                         ),
                         theme.term_selection,
@@ -1090,7 +1110,7 @@ fn paint_grid(
                     window
                         .text_system()
                         .shape_line(text.into(), px(font_size), &[run], None);
-                let origin = Point::new(bounds.origin.x + cell_w * col as f32, top);
+                let origin = Point::new(grid_x + cell_w * col as f32, top);
                 if wide {
                     let _ = line.paint(
                         origin,
@@ -1113,7 +1133,7 @@ fn paint_grid(
     if let Some((row, col, show)) = cursor {
         if show || focused {
             let top = bounds.origin.y + line_h * row as f32;
-            let x = bounds.origin.x + cell_w * col as f32;
+            let x = grid_x + cell_w * col as f32;
             if focused {
                 window.paint_quad(fill(
                     Bounds::new(Point::new(x, top), gpui::size(cell_w, line_h)),

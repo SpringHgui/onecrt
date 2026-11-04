@@ -389,12 +389,7 @@ impl OneCrt {
         } else {
             Lang::Zh
         };
-        let mcp_status = {
-            let mgr = backend.mcp.clone();
-            backend
-                .handle()
-                .block_on(async move { mcp::status(&mgr).await })
-        };
+        let mcp_status = mcp::client_status();
         let filter = cx.new(|cx| {
             InputState::new(window, cx).placeholder(tr(
                 lang,
@@ -419,15 +414,11 @@ impl OneCrt {
                 cx.notify();
             }
         });
-        let poll_backend = backend.clone();
         let mcp_poll = cx.spawn(async move |this, cx| loop {
             cx.background_executor()
                 .timer(std::time::Duration::from_secs(5))
                 .await;
-            let mgr = poll_backend.mcp.clone();
-            let status = poll_backend
-                .handle()
-                .block_on(async move { mcp::status(&mgr).await });
+            let status = mcp::client_status();
             let alive = this.update(cx, |this, cx| {
                 this.mcp = status;
                 cx.notify();
@@ -1152,6 +1143,11 @@ impl OneCrt {
         find(&self.tree.sessions, id)
     }
 
+    /// 页签与标题栏用的会话标题：只用会话名，不带分组。
+    fn session_title(&self, session: &SshSession) -> String {
+        session.name.clone()
+    }
+
     fn session_mut(&mut self, id: &str) -> Option<&mut SshSession> {
         fn find<'a>(nodes: &'a mut [Node], id: &str) -> Option<&'a mut SshSession> {
             for n in nodes {
@@ -1497,7 +1493,8 @@ impl OneCrt {
         let needs_password =
             session.password.trim().is_empty() && session.key_path.trim().is_empty();
         if !needs_password {
-            self.open_tab(session.name.clone(), connect_spec(&session), window, cx);
+            let title = self.session_title(&session);
+            self.open_tab(title, connect_spec(&session), window, cx);
             return;
         }
 
@@ -1515,7 +1512,6 @@ impl OneCrt {
                 let mut spec = connect_spec(&for_submit);
                 spec.username = user.clone();
                 spec.password = password.clone();
-                let title = for_submit.name.clone();
                 let save_id = save_id.clone();
                 entity.update(cx, |this, cx| {
                     if save {
@@ -1525,14 +1521,17 @@ impl OneCrt {
                         }
                         this.persist(cx);
                     }
+                    let title = this.session_title(&for_submit);
                     this.open_tab(title, spec, window, cx);
                 });
             },
             move |user, window, cx| {
                 let mut spec = connect_spec(&for_skip);
                 spec.username = user;
-                let title = for_skip.name.clone();
-                skip_entity.update(cx, |this, cx| this.open_tab(title, spec, window, cx));
+                skip_entity.update(cx, |this, cx| {
+                    let title = this.session_title(&for_skip);
+                    this.open_tab(title, spec, window, cx);
+                });
             },
         );
     }

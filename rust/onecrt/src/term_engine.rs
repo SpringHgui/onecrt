@@ -31,13 +31,12 @@ impl Dimensions for GridSize {
     }
 }
 
-/// 终端自己需要的非文本事件：界面据此写剪贴板、改标题、回写输入。
+/// 终端自己需要的非文本事件：界面据此写剪贴板、回写输入。
 #[derive(Clone, Debug)]
 pub enum TermEvent {
     ClipboardStore(String),
     ClipboardLoad,
     PtyWrite(String),
-    Title(String),
     Bell,
 }
 
@@ -52,8 +51,6 @@ impl EventListener for Listener {
             Event::ClipboardStore(_, text) => Some(TermEvent::ClipboardStore(text)),
             Event::ClipboardLoad(_, _) => Some(TermEvent::ClipboardLoad),
             Event::PtyWrite(text) => Some(TermEvent::PtyWrite(text)),
-            Event::Title(title) => Some(TermEvent::Title(title)),
-            Event::ResetTitle => Some(TermEvent::Title(String::new())),
             Event::Bell => Some(TermEvent::Bell),
             _ => None,
         };
