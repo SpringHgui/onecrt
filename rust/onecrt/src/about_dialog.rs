@@ -13,6 +13,7 @@ use gpui_kit::component::{
 };
 
 use crate::dialog_window;
+use crate::dialog_window::ActionButton;
 use crate::i18n::{tr, Lang};
 use crate::update;
 
@@ -125,6 +126,7 @@ impl Render for AboutWindow {
                 .child({
                     let mut check = Button::new("about-update")
                         .loading(self.checking)
+                        .action_height()
                         .label(if self.checking {
                             tr(lang, "检查中…", "Checking…")
                         } else {
@@ -151,12 +153,14 @@ impl Render for AboutWindow {
                 .child(
                     Button::new("about-repo")
                         .label(tr(lang, "项目主页", "Project home"))
+                        .action_height()
                         .on_click(|_, _, cx| cx.open_url(REPO)),
                 )
                 .child(
                     Button::new("about-close")
                         .primary()
                         .label(tr(lang, "关闭", "Close"))
+                        .action_height()
                         .on_click(|_, window, _| window.remove_window()),
                 ),
         )
@@ -360,12 +364,14 @@ impl Render for UpdateWindow {
                 Button::new("update-open")
                     .primary()
                     .label(tr(lang, "打开下载页", "Open download page"))
+                    .action_height()
                     .on_click(move |_, _, cx| cx.open_url(&url)),
             );
         }
         footer = footer.child(
             Button::new("update-close")
                 .label(tr(lang, "关闭", "Close"))
+                .action_height()
                 .on_click(|_, window, _| window.remove_window()),
         );
         dialog_window::page(

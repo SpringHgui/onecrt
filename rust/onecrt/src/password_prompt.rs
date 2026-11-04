@@ -13,6 +13,7 @@ use gpui_kit::component::{
 };
 
 use crate::dialog_window;
+use crate::dialog_window::ActionButton;
 use crate::i18n::{tr, Lang};
 
 pub struct PasswordPrompt {
@@ -163,11 +164,13 @@ impl Render for PasswordWindow {
             dialog_window::buttons()
                 .child(
                     Button::new("pwd-cancel")
+                        .action_height()
                         .label(tr(lang, "取消", "Cancel"))
                         .on_click(|_, window, _| window.remove_window()),
                 )
                 .child(
                     Button::new("pwd-skip")
+                        .action_height()
                         .label(tr(lang, "跳过", "Skip"))
                         .on_click(move |_, window, cx| {
                             let (user, _) = for_skip.read(cx).values(cx);
@@ -181,6 +184,7 @@ impl Render for PasswordWindow {
                 )
                 .child(
                     Button::new("pwd-ok")
+                        .action_height()
                         .primary()
                         .label(tr(lang, "确定", "OK"))
                         .on_click(move |_, window, cx| {

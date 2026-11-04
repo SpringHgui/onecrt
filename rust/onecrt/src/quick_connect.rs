@@ -16,6 +16,7 @@ use gpui_kit::component::{
 use onecrt_core::sessions::{default_auth, SshSession};
 
 use crate::dialog_window;
+use crate::dialog_window::ActionButton;
 use crate::i18n::{tr, Lang};
 use crate::term_view::ConnectSpec;
 
@@ -222,11 +223,13 @@ impl Render for QuickConnectWindow {
             dialog_window::buttons()
                 .child(
                     Button::new("qc-cancel")
+                        .action_height()
                         .label(tr(lang, "取消", "Cancel"))
                         .on_click(|_, window, _| window.remove_window()),
                 )
                 .child(
                     Button::new("qc-connect")
+                        .action_height()
                         .primary()
                         .label(tr(lang, "连接", "Connect"))
                         .on_click(move |_, window, cx| match for_connect.read(cx).spec(cx) {

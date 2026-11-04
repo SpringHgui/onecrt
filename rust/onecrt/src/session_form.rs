@@ -16,6 +16,7 @@ use gpui_kit::component::{
 use onecrt_core::sessions::{AuthMethod, SshSession};
 
 use crate::dialog_window;
+use crate::dialog_window::ActionButton;
 use crate::i18n::{tr, Lang};
 
 const METHODS: [(&str, &str, &str); 3] = [
@@ -331,11 +332,13 @@ impl Render for SessionFormWindow {
             dialog_window::buttons()
                 .child(
                     Button::new("session-cancel")
+                        .action_height()
                         .label(tr(lang, "取消", "Cancel"))
                         .on_click(|_, window, _| window.remove_window()),
                 )
                 .child(
                     Button::new("session-save")
+                        .action_height()
                         .primary()
                         .label(tr(lang, "保存", "Save"))
                         .on_click(move |_, window, cx| match for_save.read(cx).draft(cx) {
@@ -402,11 +405,13 @@ impl Render for TextPromptWindow {
             dialog_window::buttons()
                 .child(
                     Button::new("prompt-cancel")
+                        .action_height()
                         .label(tr(lang, "取消", "Cancel"))
                         .on_click(|_, window, _| window.remove_window()),
                 )
                 .child(
                     Button::new("prompt-ok")
+                        .action_height()
                         .primary()
                         .label(tr(lang, "确定", "OK"))
                         .on_click(move |_, window, cx| {

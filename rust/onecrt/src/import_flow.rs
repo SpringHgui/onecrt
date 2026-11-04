@@ -20,6 +20,7 @@ use onecrt_core::sessions::{Node, SessionTree};
 
 use crate::app::new_id;
 use crate::dialog_window;
+use crate::dialog_window::ActionButton;
 use crate::i18n::{tr, Lang};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -331,6 +332,7 @@ impl Render for ImportPicker {
                 .child(rows),
             dialog_window::buttons().child(
                 Button::new("import-cancel")
+                    .action_height()
                     .label(tr(lang, "取消", "Cancel"))
                     .on_click(|_, window, _| window.remove_window()),
             ),
@@ -394,11 +396,13 @@ impl Render for ConflictWindow {
             dialog_window::buttons()
                 .child(
                     Button::new("import-cancel")
+                        .action_height()
                         .label(tr(lang, "取消", "Cancel"))
                         .on_click(|_, window, _| window.remove_window()),
                 )
                 .child(
                     Button::new("import-append")
+                        .action_height()
                         .label(tr(lang, "只新增", "Append only"))
                         .on_click(move |_, window, cx| {
                             dialog_window::run_in_parent(parent, cx, |window, cx| {
@@ -409,6 +413,7 @@ impl Render for ConflictWindow {
                 )
                 .child(
                     Button::new("import-overwrite")
+                        .action_height()
                         .primary()
                         .label(tr(lang, "新增并覆盖口令", "Append + overwrite passwords"))
                         .on_click(move |_, window, cx| {

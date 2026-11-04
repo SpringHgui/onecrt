@@ -14,7 +14,22 @@ use gpui::{
     IntoElement, ParentElement, Render, SharedString, Styled, TitlebarOptions, Window,
     WindowBounds, WindowKind, WindowOptions,
 };
+use gpui_kit::component::button::Button;
 use gpui_kit::component::ActiveTheme;
+
+/// 动作按钮的统一高度，跟空状态里的「新建连接」同一个数。
+pub const ACTION_HEIGHT: f32 = 29.;
+
+/// 按项目标准高度收口一个带文字的按钮；图标工具栏按钮和贴着输入框的按钮不适用。
+pub trait ActionButton: Sized {
+    fn action_height(self) -> Self;
+}
+
+impl ActionButton for Button {
+    fn action_height(self) -> Self {
+        self.h(px(ACTION_HEIGHT))
+    }
+}
 
 /// 打开一个居中于父窗口的模态弹窗。
 pub fn open<V: Render + 'static>(
@@ -147,12 +162,14 @@ struct ConfirmWindow {
 
 impl Render for ConfirmWindow {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        use gpui_kit::component::button::{Button, ButtonVariants};
+        use gpui_kit::component::button::ButtonVariants;
 
         let lang = self.lang;
         let parent = self.parent;
         let confirm = self.on_ok.clone();
-        let mut ok = Button::new("confirm-ok").label(self.ok_label.clone());
+        let mut ok = Button::new("confirm-ok")
+            .label(self.ok_label.clone())
+            .action_height();
         ok = if self.danger {
             ok.danger()
         } else {
@@ -168,6 +185,7 @@ impl Render for ConfirmWindow {
                 .child(
                     Button::new("confirm-cancel")
                         .label(crate::i18n::tr(lang, "取消", "Cancel"))
+                        .action_height()
                         .on_click(|_, window, _| window.remove_window()),
                 )
                 .child(ok.on_click(move |_, window, cx| {

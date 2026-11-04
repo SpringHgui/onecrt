@@ -15,6 +15,7 @@ use gpui_kit::component::{
 };
 
 use crate::dialog_window;
+use crate::dialog_window::ActionButton;
 use crate::i18n::{tr, Lang};
 
 pub struct CommandFields {
@@ -161,11 +162,13 @@ impl Render for CommandFormWindow {
             dialog_window::buttons()
                 .child(
                     Button::new("cmd-cancel")
+                        .action_height()
                         .label(tr(lang, "取消", "Cancel"))
                         .on_click(|_, window, _| window.remove_window()),
                 )
                 .child(
                     Button::new("cmd-ok")
+                        .action_height()
                         .primary()
                         .label(tr(lang, "保存", "Save"))
                         .on_click(move |_, window, cx| match for_save.read(cx).fields(cx) {

@@ -24,6 +24,7 @@ use onecrt_core::mcp::{self, Status};
 use onecrt_core::Backend;
 
 use crate::dialog_window;
+use crate::dialog_window::ActionButton;
 use crate::i18n::{tr, Lang};
 
 enum Msg {
@@ -440,6 +441,7 @@ impl Render for McpDialog {
                     )
                     .child(
                         Button::new("mcp-token-show")
+                            .action_height()
                             .label(if self.show_token {
                                 tr(lang, "隐藏", "Hide")
                             } else {
@@ -452,6 +454,7 @@ impl Render for McpDialog {
                     )
                     .child(
                         Button::new("mcp-token-rotate")
+                            .action_height()
                             .label(tr(lang, "重新生成", "Regenerate"))
                             .on_click(cx.listener(|this, _, _, _cx| this.rotate_token())),
                     ),
@@ -522,6 +525,7 @@ impl Render for McpDialog {
                         .child(div().flex_1())
                         .child(
                             Button::new("mcp-copy")
+                                .action_height()
                                 .label(if self.copied {
                                     tr(lang, "已复制", "Copied")
                                 } else {
@@ -684,6 +688,7 @@ impl Render for McpWindow {
                 .child(self.panel.clone()),
             dialog_window::buttons().child(
                 Button::new("mcp-close")
+                    .action_height()
                     .primary()
                     .label(tr(self.lang, "关闭", "Close"))
                     .on_click(|_, window, _| window.remove_window()),

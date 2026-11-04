@@ -4330,7 +4330,7 @@ impl OneCrt {
             .child(
                 div()
                     .id("empty-new")
-                    .h(px(29.))
+                    .h(px(dialog_window::ACTION_HEIGHT))
                     .px(px(14.))
                     .flex()
                     .items_center()
