@@ -4337,7 +4337,7 @@ impl OneCrt {
                     .gap(px(6.))
                     .rounded(px(6.))
                     .bg(t.accent)
-                    .text_color(gpui::rgb(0x0d1b10))
+                    .text_color(gpui::rgb(0xffffff))
                     .text_size(px(13.))
                     .font_weight(gpui::FontWeight::SEMIBOLD)
                     .cursor_pointer()
