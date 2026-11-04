@@ -67,7 +67,7 @@ jobs:
           workspaces: rust -> target
 
       - name: 构建
-        run: cargo build --release -p onecrt
+        run: cargo build --release -p onecrt -p onecrt-mcpd
 
       - name: 准备 Inno Setup
         shell: pwsh
@@ -179,7 +179,7 @@ jobs:
           workspaces: rust -> target
 
       - name: 构建
-        run: cargo build --release -p onecrt
+        run: cargo build --release -p onecrt -p onecrt-mcpd
 
       - name: 打包 DEB
         run: |
@@ -201,8 +201,9 @@ jobs:
            Pure Rust implementation of a cross-platform SSH terminal with SFTP support.
           EOF
           
-          cp target/release/onecrt "$pkg/usr/bin/"
-          chmod 755 "$pkg/usr/bin/onecrt"
+          # 后台服务程序和主程序同目录：界面按「和自己同目录」找 onecrt-mcpd
+          cp target/release/onecrt target/release/onecrt-mcpd "$pkg/usr/bin/"
+          chmod 755 "$pkg/usr/bin/onecrt" "$pkg/usr/bin/onecrt-mcpd"
           
           cat > "$pkg/usr/share/applications/onecrt.desktop" <<EOF
           [Desktop Entry]
@@ -247,7 +248,7 @@ jobs:
           workspaces: rust -> target
 
       - name: 构建
-        run: cargo build --release -p onecrt
+        run: cargo build --release -p onecrt -p onecrt-mcpd
 
       - name: 打包 .app
         run: |
@@ -257,6 +258,8 @@ jobs:
           rm -rf "$app"
           mkdir -p "$app/Contents/MacOS" "$app/Contents/Resources"
           cp target/release/onecrt "$app/Contents/MacOS/OneCRT"
+          # 后台服务程序和主程序同目录；名字保持 cargo 输出的 onecrt-mcpd，界面按这个名字找它
+          cp target/release/onecrt-mcpd "$app/Contents/MacOS/onecrt-mcpd"
           cp onecrt/assets/icon.icns "$app/Contents/Resources/icon.icns"
           cat > "$app/Contents/Info.plist" <<EOF
           <?xml version="1.0" encoding="UTF-8"?>

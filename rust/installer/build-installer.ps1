@@ -1,7 +1,7 @@
 ﻿# 构建 OneCRT Windows 安装包（Inno Setup）
 #
 #   powershell -ExecutionPolicy Bypass -File rust/installer/build-installer.ps1
-#   ... -SkipBuild      # 复用已构建的 target\release\onecrt.exe
+#   ... -SkipBuild      # 复用已构建的 target\release\onecrt.exe / onecrt-mcpd.exe
 #   ... -Iscc <path>    # 指定 ISCC.exe
 #
 # 产物：rust\target\installer\onecrt-<版本>-windows-x64-setup.exe
@@ -19,7 +19,7 @@ $cargo = Join-Path $root 'Cargo.toml'
 if (-not $SkipBuild) {
     Push-Location $root
     try {
-        cargo build --release -p onecrt
+        cargo build --release -p onecrt -p onecrt-mcpd
         if ($LASTEXITCODE -ne 0) { throw "cargo build 失败，退出码 $LASTEXITCODE" }
     }
     finally {
@@ -34,7 +34,9 @@ $version = $match.Matches[0].Groups[1].Value
 $stage = Join-Path $root 'target\installer\stage'
 if (Test-Path $stage) { Remove-Item $stage -Recurse -Force }
 New-Item -ItemType Directory -Force $stage | Out-Null
+# 主程序和后台服务程序必须在同一个目录：界面按「和自己同目录」找 onecrt-mcpd.exe
 Copy-Item (Join-Path $root 'target\release\onecrt.exe') $stage
+Copy-Item (Join-Path $root 'target\release\onecrt-mcpd.exe') $stage
 
 # Rust 的 MSVC 目标默认动态链接 VC 运行库，带上它的 DLL 免得目标机没装 VC++ 运行库
 $crt = Join-Path $env:SystemRoot 'System32\vcruntime140.dll'
