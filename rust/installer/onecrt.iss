@@ -75,3 +75,30 @@ Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: 
 
 [Run]
 Filename: "{app}\{#MyAppExeName}"; Description: "{cm:LaunchProgram,{#StringChange(MyAppName, '&', '&&')}}"; Flags: nowait postinstall skipifsilent
+
+[Code]
+// onecrt-mcpd 是无窗口的常驻进程，Restart Manager（CloseApplications）只能关带窗口的程序，
+// 关不掉它；而正在运行的 exe 无法覆盖，会报 DeleteFile 失败、错误 5。
+// 它被结束后不用管：主程序启动时的 mcp::boot() 会按心跳重新拉起。
+procedure StopDaemon;
+var
+  ResultCode: Integer;
+begin
+  Exec(
+    'powershell.exe',
+    '-NoProfile -ExecutionPolicy Bypass -Command "Get-Process onecrt-mcpd -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq ''' +
+      ExpandConstant('{app}\onecrt-mcpd.exe') + ''' } | Stop-Process -Force"',
+    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+begin
+  StopDaemon;
+  Result := '';
+end;
+
+function InitializeUninstall(): Boolean;
+begin
+  StopDaemon;
+  Result := True;
+end;
