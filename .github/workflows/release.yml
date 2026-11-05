@@ -331,6 +331,6 @@ jobs:
             | macOS arm64 | `onecrt-${{ needs.meta.outputs.version }}-macos-arm64.dmg` | 双击挂载拖入 Applications |
 
             未做代码签名（首启有 SmartScreen / Gatekeeper 提示）。
-            应用内「关于 → 检查更新」只提示新版本并打开本页，不自动安装。
+            应用内「关于 → 检查更新」在 Windows 上会下载安装包并静默升级（支持断点续传），其它平台只提示到本页下载。
           generate_release_notes: true
           files: artifacts/*

@@ -21,12 +21,20 @@ dirs = "6"
 rfd = "0.16"
 arboard = "3.7"
 chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
-ureq = "3"
+ureq = { version = "3", features = ["socks-proxy"] }
+
+[dev-dependencies]
+# 只给 gpui 打开 test-support：反过来给 gpui-kit 打这个特性会让 cargo
+# 把弱依赖 gpui-fast 也拉进依赖图，跟锁定的 taffy 版本打架。
+# 改名是为了躲开 app.rs 里的 `use gpui_kit as gpui;`：gpui-pre 的库名也叫 gpui。
+gpui-pre-test-support = { package = "gpui-pre", version = "=0.3.10", features = ["test-support"] }
 
 [target.'cfg(windows)'.build-dependencies]
 embed-resource = "3"
 
 [target.'cfg(windows)'.dependencies]
+# 「Internet 选项」里配的系统代理，ureq 只在开了这个特性时读注册表
+ureq = { version = "3", features = ["socks-proxy", "win-system-proxy"] }
 raw-window-handle = "0.6"
 windows-sys = { version = "0.59", features = [
     "Win32_Foundation",

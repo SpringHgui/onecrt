@@ -12,3 +12,6 @@ path = "src/main.rs"
 [dependencies]
 onecrt-core = { path = "../onecrt-core" }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "time", "net", "sync", "io-util"] }
+
+[target.'cfg(windows)'.build-dependencies]
+embed-resource = "3"

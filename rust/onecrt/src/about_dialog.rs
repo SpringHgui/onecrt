@@ -9,6 +9,7 @@ use gpui::{
 use gpui_kit::component::{
     button::{Button, ButtonVariants},
     notification::Notification,
+    progress::Progress,
     ActiveTheme, Icon, Sizable, WindowExt,
 };
 
@@ -256,34 +257,40 @@ fn show_update(window: &mut Window, cx: &mut App, lang: Lang, latest: update::La
     let auto = update::can_auto_install() && latest.asset.is_some();
     let version = latest.version.clone();
     let url = std::rc::Rc::new(latest.url.clone());
-    let status: SharedString = match (auto, lang) {
-        (true, Lang::Zh) => format!("正在下载 OneCRT v{version}…").into(),
-        (true, Lang::En) => format!("Downloading OneCRT v{version}…").into(),
-        (false, Lang::Zh) => {
-            format!("OneCRT v{version} 已发布，当前平台请到发布页下载安装。").into()
-        }
-        (false, Lang::En) => {
-            format!("OneCRT v{version} is out; download it from the release page on this platform.")
-                .into()
-        }
+    let downloading: SharedString = match lang {
+        Lang::Zh => format!("正在下载 OneCRT v{version}…").into(),
+        Lang::En => format!("Downloading OneCRT v{version}…").into(),
     };
+    let status: SharedString = if auto {
+        downloading.clone()
+    } else if lang == Lang::Zh {
+        format!("OneCRT v{version} 已发布，当前平台请到发布页下载安装。").into()
+    } else {
+        format!("OneCRT v{version} is out; download it from the release page on this platform.")
+            .into()
+    };
+    // 自动更新时多留出进度条和速度那一行
     dialog_window::open(
         window,
         cx,
         tr(lang, "发现新版本", "Update available"),
         420.,
-        176.,
+        if auto { 200. } else { 176. },
         move |_, cx| {
             let entity = cx.new(|_| UpdateWindow {
                 lang,
                 version: version.clone(),
+                downloading,
                 status: status.clone(),
                 url,
                 phase: if auto { Phase::Working } else { Phase::Manual },
                 task: None,
+                progress: None,
+                latest: auto.then(|| latest.clone()),
+                cancel: Default::default(),
             });
             if auto {
-                entity.update(cx, |this, cx| this.start(latest, cx));
+                entity.update(cx, |this, cx| this.start(cx));
             }
             entity
         },
@@ -305,27 +312,58 @@ enum Phase {
 struct UpdateWindow {
     lang: Lang,
     version: String,
+    /// 「正在下载 v…」这句要复用，重试时再设回去
+    downloading: SharedString,
     status: SharedString,
     url: std::rc::Rc<String>,
     phase: Phase,
     task: Option<gpui::Task<()>>,
+    progress: Option<update::DownloadProgress>,
+    latest: Option<update::Latest>,
+    /// 窗口关掉就置位，下载线程看到后留着半截文件退出，等下次续传
+    cancel: std::sync::Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl Drop for UpdateWindow {
+    fn drop(&mut self) {
+        self.cancel
+            .store(true, std::sync::atomic::Ordering::Relaxed);
+    }
+}
+
+enum DownloadMsg {
+    Progress(update::DownloadProgress),
+    Done(Result<std::path::PathBuf, String>),
 }
 
 impl UpdateWindow {
-    fn start(&mut self, latest: update::Latest, cx: &mut Context<Self>) {
-        let (tx, rx) = async_channel::bounded(1);
+    fn start(&mut self, cx: &mut Context<Self>) {
+        let Some(latest) = self.latest.clone() else {
+            return;
+        };
+        let (tx, rx) = async_channel::unbounded();
+        let cancel = self.cancel.clone();
         std::thread::spawn(move || {
-            let _ = tx.send_blocking(update::download(&latest));
+            let result = update::download(&latest, &cancel, |progress| {
+                let _ = tx.try_send(DownloadMsg::Progress(progress));
+            });
+            let _ = tx.try_send(DownloadMsg::Done(result));
         });
         self.task = Some(cx.spawn(async move |this, cx| {
-            let Ok(downloaded) = rx.recv().await else {
-                return;
-            };
-            let setup = match downloaded {
-                Ok(path) => path,
-                Err(error) => {
-                    let _ = this.update(cx, |this, cx| this.fail(error, cx));
-                    return;
+            let setup = loop {
+                match rx.recv().await {
+                    Ok(DownloadMsg::Progress(progress)) => {
+                        let _ = this.update(cx, |this, cx| {
+                            this.progress = Some(progress);
+                            cx.notify();
+                        });
+                    }
+                    Ok(DownloadMsg::Done(Ok(path))) => break path,
+                    Ok(DownloadMsg::Done(Err(error))) => {
+                        let _ = this.update(cx, |this, cx| this.fail(error, cx));
+                        return;
+                    }
+                    Err(_) => return,
                 }
             };
             // install 只负责把安装程序挂到本进程退出之后，返回很快
@@ -362,6 +400,18 @@ impl UpdateWindow {
         }));
     }
 
+    fn retry(&mut self, cx: &mut Context<Self>) {
+        if self.latest.is_none() {
+            return;
+        }
+        self.phase = Phase::Working;
+        self.progress = None;
+        self.status = self.downloading.clone();
+        self.cancel = Default::default();
+        self.start(cx);
+        cx.notify();
+    }
+
     fn fail(&mut self, error: String, cx: &mut Context<Self>) {
         self.phase = Phase::Failed;
         self.status = if self.lang == Lang::Zh {
@@ -377,20 +427,34 @@ impl Render for UpdateWindow {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let lang = self.lang;
         let url = self.url.clone();
+        let muted = cx.theme().muted_foreground;
+        let accent = cx.theme().primary;
         let title: SharedString = if lang == Lang::Zh {
             format!("OneCRT v{} 已发布", self.version).into()
         } else {
             format!("OneCRT v{} is out", self.version).into()
         };
         let mut footer = dialog_window::buttons();
-        if !matches!(self.phase, Phase::Working | Phase::Restarting) {
+        if self.phase == Phase::Failed {
             footer = footer.child(
-                Button::new("update-open")
+                Button::new("update-retry")
                     .primary()
-                    .label(tr(lang, "打开下载页", "Open download page"))
+                    .label(tr(lang, "重试", "Retry"))
                     .action_height()
-                    .on_click(move |_, _, cx| cx.open_url(&url)),
+                    .on_click(cx.listener(|this, _, _, cx| this.retry(cx))),
             );
+        }
+        if !matches!(self.phase, Phase::Working | Phase::Restarting) {
+            let open = Button::new("update-open")
+                .label(tr(lang, "打开下载页", "Open download page"))
+                .action_height()
+                .on_click(move |_, _, cx| cx.open_url(&url));
+            // 失败态里「重试」才是主按钮
+            footer = footer.child(if self.phase == Phase::Failed {
+                open
+            } else {
+                open.primary()
+            });
         }
         footer = footer.child(
             Button::new("update-close")
@@ -398,25 +462,96 @@ impl Render for UpdateWindow {
                 .action_height()
                 .on_click(|_, window, _| window.remove_window()),
         );
-        dialog_window::page(
-            cx,
-            div()
-                .flex()
-                .flex_col()
-                .gap(px(6.))
+
+        let mut content = div()
+            .flex()
+            .flex_col()
+            .gap(px(6.))
+            .child(
+                div()
+                    .text_size(px(13.))
+                    .font_weight(gpui::FontWeight::SEMIBOLD)
+                    .child(title),
+            )
+            .child(
+                div()
+                    .text_size(px(12.))
+                    .text_color(muted)
+                    .child(self.status.clone()),
+            );
+        if self.phase == Phase::Working {
+            let (value, stats) = match &self.progress {
+                Some(progress) => (
+                    progress
+                        .total
+                        .filter(|total| *total > 0)
+                        .map(|total| {
+                            (progress.downloaded as f32 / total as f32 * 100.).clamp(0., 100.)
+                        })
+                        .unwrap_or(0.),
+                    Some(download_stats(progress)),
+                ),
+                None => (0., None),
+            };
+            content = content
                 .child(
-                    div()
-                        .text_size(px(13.))
-                        .font_weight(gpui::FontWeight::SEMIBOLD)
-                        .child(title),
+                    div().pt(px(4.)).child(
+                        Progress::new("update-progress")
+                            .loading(self.progress.is_none())
+                            .value(value)
+                            .color(accent)
+                            .accessibility_label(tr(lang, "下载进度", "Download progress")),
+                    ),
                 )
                 .child(
                     div()
-                        .text_size(px(12.))
-                        .text_color(cx.theme().muted_foreground)
-                        .child(self.status.clone()),
-                ),
-            footer,
-        )
+                        .text_size(px(11.))
+                        .text_color(muted)
+                        .child(match stats {
+                            Some(stats) => SharedString::from(stats),
+                            None => tr(lang, "正在连接…", "Connecting…"),
+                        }),
+                );
+        }
+
+        dialog_window::page(cx, content, footer)
+    }
+}
+
+/// 「3.2 / 13.8 MB · 23% · 1.2 MB/s」，总量未知时省掉百分比。
+fn download_stats(progress: &update::DownloadProgress) -> String {
+    let mut parts = Vec::new();
+    match progress.total.filter(|total| *total > 0) {
+        Some(total) => {
+            parts.push(format!(
+                "{} / {}",
+                human_size(progress.downloaded as f64),
+                human_size(total as f64)
+            ));
+            parts.push(format!(
+                "{:.0}%",
+                progress.downloaded as f64 / total as f64 * 100.
+            ));
+        }
+        None => parts.push(human_size(progress.downloaded as f64)),
+    }
+    if progress.bytes_per_sec > 0. {
+        parts.push(format!("{}/s", human_size(progress.bytes_per_sec)));
+    }
+    parts.join(" · ")
+}
+
+fn human_size(bytes: f64) -> String {
+    const UNITS: [&str; 4] = ["B", "KB", "MB", "GB"];
+    let mut value = bytes.max(0.);
+    let mut unit = 0;
+    while value >= 1024. && unit < UNITS.len() - 1 {
+        value /= 1024.;
+        unit += 1;
+    }
+    if unit == 0 {
+        format!("{value:.0} {}", UNITS[unit])
+    } else {
+        format!("{value:.1} {}", UNITS[unit])
     }
 }

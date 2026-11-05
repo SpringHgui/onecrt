@@ -16,6 +16,7 @@ mod mcp_dialog;
 mod move_paint_skip;
 mod password_prompt;
 mod perf_panel;
+mod proxy_dialog;
 mod quick_connect;
 mod session_form;
 mod term_engine;

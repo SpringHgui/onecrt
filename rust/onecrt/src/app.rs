@@ -2,20 +2,23 @@
 
 use gpui_kit as gpui;
 
+use std::rc::Rc;
 use std::sync::Arc;
 
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
-    div, point, px, relative, size, AnyWindowHandle, AppContext, Bounds, Context, CursorStyle, Div,
-    Entity, InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels, Point, Render,
-    SharedString, Stateful, StatefulInteractiveElement, Styled, Subscription, TitlebarOptions,
-    Window, WindowBounds, WindowControlArea, WindowOptions,
+    div, point, px, relative, size, Anchor, AnyWindowHandle, App, AppContext, Bounds, Context,
+    CursorStyle, DismissEvent, Div, Entity, Focusable, InteractiveElement, IntoElement,
+    MouseButton, ParentElement, Pixels, Point, Render, RenderOnce, SharedString, Stateful,
+    StatefulInteractiveElement, Styled, Subscription, TitlebarOptions, Window, WindowBounds,
+    WindowControlArea, WindowOptions,
 };
 use gpui_kit::assets::IconName;
 use gpui_kit::component::{
     button::{Button, ButtonVariants},
     input::{Input, InputEvent, InputState},
     menu::{ContextMenuExt, DropdownMenu, PopupMenu, PopupMenuItem},
+    popover::Popover,
     Icon,
 };
 use onecrt_core::mcp;
@@ -35,6 +38,7 @@ use crate::import_flow::{self, ImportKind, Plan as ImportPlan};
 use crate::mcp_dialog::open_mcp_dialog;
 use crate::password_prompt::open_password_prompt;
 use crate::perf_panel::{PerfPanel, PerfPanelEvent};
+use crate::proxy_dialog::open_proxy_dialog;
 use crate::quick_connect::open_quick_connect;
 use crate::session_form::{open_session_form, open_text_prompt, SessionDraft};
 use crate::term_view::{ConnState, ConnectSpec, TabEvent, TerminalView, Zoom};
@@ -328,6 +332,16 @@ struct SessClip {
     cut: bool,
 }
 
+/// 顶部菜单栏的五项；同一时刻至多展开一项。
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum TopMenu {
+    File,
+    Edit,
+    Terminal,
+    View,
+    Help,
+}
+
 pub struct OneCrt {
     backend: Arc<Backend>,
     theme: Theme,
@@ -363,12 +377,18 @@ pub struct OneCrt {
     left_w: f32,
     right_w: f32,
     mcp: mcp::Status,
+    /// 代理方式："direct" | "system" | "custom"，状态栏只给自定义代理留位置
+    proxy_mode: String,
+    /// 保存的自定义代理地址；切到直连/系统也保留着
+    proxy: String,
     _mcp_poll: gpui::Task<()>,
     /// 自动隐藏时贴边探出的浮层；不改停靠布局，只覆盖在内容上。
     peek: Option<DockPeek>,
     peek_gen: u64,
     rail_hover: bool,
     flyout_hover: bool,
+    /// 顶部菜单栏展开的那一项，悬停到相邻项时跟随切换。
+    open_menu: Option<TopMenu>,
 }
 
 impl OneCrt {
@@ -390,6 +410,8 @@ impl OneCrt {
             Lang::Zh
         };
         let mcp_status = mcp::client_status();
+        let proxy_mode = prefs.proxy_mode.clone();
+        let proxy = prefs.proxy.clone();
         let filter = cx.new(|cx| {
             InputState::new(window, cx).placeholder(tr(
                 lang,
@@ -474,11 +496,14 @@ impl OneCrt {
             left_w: 260.,
             right_w: 460.,
             mcp: mcp_status,
+            proxy_mode,
+            proxy,
             _mcp_poll: mcp_poll,
             peek: None,
             peek_gen: 0,
             rail_hover: false,
             flyout_hover: false,
+            open_menu: None,
         }
     }
 
@@ -1697,7 +1722,8 @@ impl OneCrt {
         let lang = self.lang;
         let entity = cx.entity();
 
-        let menu = |id: &'static str,
+        let menu = |which: TopMenu,
+                    id: &'static str,
                     label: SharedString,
                     build: fn(
             PopupMenu,
@@ -1708,8 +1734,35 @@ impl OneCrt {
         ) -> PopupMenu|
          -> gpui::AnyElement {
             let app = entity.clone();
-            menu_button(id, label, &t, move |menu, window, cx| {
-                build(menu, app.clone(), lang, window, cx).min_w(px(250.))
+            let build_app = entity.clone();
+            let trigger = Button::new(id)
+                .ghost()
+                .compact()
+                .label(label)
+                .text_size(px(12.5))
+                .text_color(t.text)
+                .h(px(26.))
+                .px(px(10.))
+                .on_hover(cx.listener(move |this, hovered: &bool, _window, cx| {
+                    // 已有一项展开时，悬停到相邻项即切换，无需再点一次。
+                    if *hovered && this.open_menu.is_some() && this.open_menu != Some(which) {
+                        this.open_menu = Some(which);
+                        cx.notify();
+                    }
+                }));
+            MenuDropdown::new(id, trigger, move |menu, window, cx| {
+                build(menu, build_app.clone(), lang, window, cx).min_w(px(250.))
+            })
+            .open(self.open_menu == Some(which))
+            .on_open_change(move |&open, _window, cx| {
+                app.update(cx, |this, cx| {
+                    if open {
+                        this.open_menu = Some(which);
+                    } else if this.open_menu == Some(which) {
+                        this.open_menu = None;
+                    }
+                    cx.notify();
+                });
             })
             .into_any_element()
         };
@@ -1737,15 +1790,36 @@ impl OneCrt {
                     .gap(px(2.))
                     .pl(px(8.))
                     .pr(px(4.))
-                    .child(menu("menu-file", tr(lang, "文件", "File"), file_menu))
-                    .child(menu("menu-edit", tr(lang, "编辑", "Edit"), edit_menu))
                     .child(menu(
+                        TopMenu::File,
+                        "menu-file",
+                        tr(lang, "文件", "File"),
+                        file_menu,
+                    ))
+                    .child(menu(
+                        TopMenu::Edit,
+                        "menu-edit",
+                        tr(lang, "编辑", "Edit"),
+                        edit_menu,
+                    ))
+                    .child(menu(
+                        TopMenu::Terminal,
                         "menu-terminal",
                         tr(lang, "终端", "Terminal"),
                         terminal_menu,
                     ))
-                    .child(menu("menu-view", tr(lang, "视图", "View"), view_menu))
-                    .child(menu("menu-help", tr(lang, "帮助", "Help"), help_menu)),
+                    .child(menu(
+                        TopMenu::View,
+                        "menu-view",
+                        tr(lang, "视图", "View"),
+                        view_menu,
+                    ))
+                    .child(menu(
+                        TopMenu::Help,
+                        "menu-help",
+                        tr(lang, "帮助", "Help"),
+                        help_menu,
+                    )),
             )
             .child(
                 div()
@@ -4348,6 +4422,22 @@ impl OneCrt {
             )
     }
 
+    /// 打开代理设置；保存成功后把状态栏那一格同步过来。
+    fn open_proxy_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let this = cx.entity().downgrade();
+        open_proxy_dialog(window, cx, self.lang, move |cx| {
+            let _ = this.update(cx, |this, cx| {
+                let prefs = settings::load();
+                // 这份快照还要给主题/字号/采样间隔的保存用，不同步会把这些设置又写回旧值
+                this.prefs.proxy_mode = prefs.proxy_mode.clone();
+                this.prefs.proxy = prefs.proxy.clone();
+                this.proxy_mode = prefs.proxy_mode;
+                this.proxy = prefs.proxy;
+                cx.notify();
+            });
+        });
+    }
+
     fn status_bar(&self, cx: &mut Context<Self>) -> Div {
         let t = self.theme.clone();
         let th = t.clone();
@@ -4503,6 +4593,32 @@ impl OneCrt {
                 }))
                 .child(SharedString::from(format!("{:.0}px", self.mono_size))),
         );
+        if self.proxy_mode == settings::PROXY_CUSTOM && !self.proxy.is_empty() {
+            let th = t.clone();
+            bar = bar.child(status_sep(&t)).child(
+                div()
+                    .id("status-proxy")
+                    .flex()
+                    .items_center()
+                    .gap(px(5.))
+                    .px(px(6.))
+                    .h(px(20.))
+                    .rounded(px(6.))
+                    .text_color(t.text_2)
+                    .cursor_pointer()
+                    .hover(move |s| s.bg(th.bg_hover).text_color(th.text))
+                    .on_click(
+                        cx.listener(|this, _, window, cx| this.open_proxy_settings(window, cx)),
+                    )
+                    .child(div().size(px(6.)).rounded_full().bg(t.accent))
+                    .child(tr(lang, "代理", "Proxy"))
+                    .child(
+                        div()
+                            .text_color(t.text_3)
+                            .child(proxy_endpoint(&self.proxy)),
+                    ),
+            );
+        }
         let th = t.clone();
         let (mcp_dot, mcp_text, mcp_port) = if self.mcp.running {
             (t.accent, SharedString::from("MCP"), Some(self.mcp.port))
@@ -4726,6 +4842,13 @@ fn status_sep(t: &Theme) -> Div {
     div().w(px(1.)).h(px(11.)).bg(t.border)
 }
 
+/// 状态栏只放 host:port：协议和账号又长又不该露在屏幕上。
+fn proxy_endpoint(url: &str) -> SharedString {
+    let rest = url.split_once("://").map(|(_, rest)| rest).unwrap_or(url);
+    let rest = rest.rsplit_once('@').map(|(_, rest)| rest).unwrap_or(rest);
+    SharedString::from(rest.trim_end_matches('/'))
+}
+
 #[cfg(windows)]
 fn lock_keys() -> (bool, bool) {
     use windows_sys::Win32::UI::Input::KeyboardAndMouse::{GetKeyState, VK_CAPITAL, VK_NUMLOCK};
@@ -4744,21 +4867,94 @@ fn lock_label(label: &'static str, on: bool, t: &Theme) -> impl IntoElement {
         .child(SharedString::from(label))
 }
 
-fn menu_button(
-    id: &'static str,
-    label: SharedString,
-    t: &Theme,
-    build: impl Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu + 'static,
-) -> impl IntoElement {
-    Button::new(id)
-        .ghost()
-        .compact()
-        .label(label)
-        .text_size(px(12.5))
-        .text_color(t.text)
-        .h(px(26.))
-        .px(px(10.))
-        .dropdown_menu(build)
+/// 下拉菜单实体挂在按键的状态里，收起后再展开才重建，避免每帧重建菜单项。
+#[derive(Default)]
+struct MenuDropdownState {
+    menu: Option<Entity<PopupMenu>>,
+}
+
+/// 展开状态由外部控制的菜单按钮（gpui-component 的 dropdown_menu 只能点开，
+/// 顶部菜单栏要在悬停相邻项时直接切换，所以自己保留一份受控外壳）。
+#[derive(IntoElement)]
+struct MenuDropdown {
+    id: SharedString,
+    open: bool,
+    trigger: Button,
+    builder: Rc<dyn Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu>,
+    on_open_change: Option<Rc<dyn Fn(&bool, &mut Window, &mut App)>>,
+}
+
+impl MenuDropdown {
+    fn new(
+        id: &'static str,
+        trigger: Button,
+        builder: impl Fn(PopupMenu, &mut Window, &mut Context<PopupMenu>) -> PopupMenu + 'static,
+    ) -> Self {
+        Self {
+            id: SharedString::from(format!("menu-dropdown-{id}")),
+            open: false,
+            trigger,
+            builder: Rc::new(builder),
+            on_open_change: None,
+        }
+    }
+
+    fn open(mut self, open: bool) -> Self {
+        self.open = open;
+        self
+    }
+
+    fn on_open_change(mut self, callback: impl Fn(&bool, &mut Window, &mut App) + 'static) -> Self {
+        self.on_open_change = Some(Rc::new(callback));
+        self
+    }
+}
+
+impl RenderOnce for MenuDropdown {
+    fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
+        let state =
+            window.use_keyed_state(self.id.clone(), cx, |_, _| MenuDropdownState::default());
+        let builder = self.builder.clone();
+
+        Popover::new(SharedString::from(format!("popover:{}", self.id)))
+            .appearance(false)
+            .overlay_closable(false)
+            .anchor(Anchor::TopLeft)
+            .open(self.open)
+            .trigger(self.trigger)
+            .when_some(self.on_open_change, |this, callback| {
+                this.on_open_change(move |open, window, cx| callback(open, window, cx))
+            })
+            .content(move |_, window, cx| {
+                let menu = match state.read(cx).menu.clone() {
+                    Some(menu) => menu,
+                    None => {
+                        let builder = builder.clone();
+                        let menu = PopupMenu::build(window, cx, move |menu, window, cx| {
+                            builder(menu, window, cx)
+                        });
+                        // 菜单自己收起（点外部、Esc、选中菜单项）时同步收起外壳。
+                        let popover = cx.entity().downgrade();
+                        window
+                            .subscribe(&menu, cx, {
+                                let state = state.downgrade();
+                                move |_, _: &DismissEvent, window, cx| {
+                                    if let Some(popover) = popover.upgrade() {
+                                        popover.update(cx, |state, cx| state.dismiss(window, cx));
+                                    }
+                                    _ = state.update(cx, |state, _| state.menu = None);
+                                }
+                            })
+                            .detach();
+                        state.update(cx, |state, _| state.menu = Some(menu.clone()));
+                        menu
+                    }
+                };
+                // 悬停切换时旧菜单只是不渲染，焦点要重新落到新菜单上。
+                menu.focus_handle(cx).focus(window, cx);
+                menu
+            })
+    }
 }
 
 fn window_control(
@@ -5388,9 +5584,17 @@ fn help_menu(
     let backend = app.read(cx).backend.clone();
     let mcp = PopupMenuItem::new(tr(lang, "MCP 服务…", "MCP Service…"))
         .on_click(move |_, window, cx| open_mcp_dialog(window, cx, backend.clone(), lang));
+    let proxy = {
+        let e = app.clone();
+        PopupMenuItem::new(tr(lang, "网络代理…", "Network Proxy…")).on_click(
+            move |_, window, cx| {
+                e.update(cx, |this, cx| this.open_proxy_settings(window, cx));
+            },
+        )
+    };
     let about = PopupMenuItem::new(tr(lang, "关于 OneCRT", "About OneCRT"))
         .on_click(move |_, window, cx| open_about(window, cx, lang));
-    menu.item(mcp).separator().item(about)
+    menu.item(mcp).item(proxy).separator().item(about)
 }
 
 struct Row {
@@ -5706,5 +5910,90 @@ pub fn window_options(cx: &mut gpui::App) -> WindowOptions {
         }),
         window_min_size: Some(size(px(880.), px(560.))),
         ..Default::default()
+    }
+}
+
+#[cfg(test)]
+mod menu_bar_tests {
+    use super::*;
+    use gpui::{Modifiers, TestAppContext};
+
+    struct Harness {
+        open: Option<TopMenu>,
+    }
+
+    impl Harness {
+        fn menu(
+            &self,
+            which: TopMenu,
+            id: &'static str,
+            cx: &mut Context<Self>,
+        ) -> gpui::AnyElement {
+            let entity = cx.entity();
+            let trigger = Button::new(id)
+                .label(id)
+                .h(px(26.))
+                .w(px(48.))
+                .on_hover(cx.listener(move |this, hovered: &bool, _window, cx| {
+                    if *hovered && this.open.is_some() && this.open != Some(which) {
+                        this.open = Some(which);
+                        cx.notify();
+                    }
+                }));
+            MenuDropdown::new(id, trigger, |menu, _, _| {
+                menu.item(PopupMenuItem::new("Item"))
+            })
+            .open(self.open == Some(which))
+            .on_open_change(move |&open, _window, cx| {
+                entity.update(cx, |this, cx| {
+                    if open {
+                        this.open = Some(which);
+                    } else if this.open == Some(which) {
+                        this.open = None;
+                    }
+                    cx.notify();
+                });
+            })
+            .into_any_element()
+        }
+    }
+
+    impl Render for Harness {
+        fn render(&mut self, _window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+            div()
+                .flex()
+                .gap(px(2.))
+                .child(self.menu(TopMenu::File, "m-file", cx))
+                .child(self.menu(TopMenu::Edit, "m-edit", cx))
+        }
+    }
+
+    #[gpui::test]
+    fn hovering_a_sibling_switches_the_open_menu(cx: &mut TestAppContext) {
+        cx.update(gpui_kit::init);
+        let (view, cx) = cx.add_window_view(|_, _| Harness { open: None });
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+
+        cx.simulate_mouse_move(point(px(74.), px(13.)), None, Modifiers::none());
+        assert_eq!(
+            cx.update(|_, cx| view.read(cx).open),
+            None,
+            "hovering with no menu open must not open one"
+        );
+
+        cx.simulate_click(point(px(24.), px(13.)), Modifiers::none());
+        assert_eq!(
+            cx.update(|_, cx| view.read(cx).open),
+            Some(TopMenu::File),
+            "clicking the trigger must open its menu"
+        );
+
+        cx.update(|window, cx| window.draw(cx).clear(cx));
+        cx.simulate_mouse_move(point(px(74.), px(13.)), None, Modifiers::none());
+        assert_eq!(
+            cx.update(|_, cx| view.read(cx).open),
+            Some(TopMenu::Edit),
+            "hovering a sibling while a menu is open must switch to it"
+        );
     }
 }

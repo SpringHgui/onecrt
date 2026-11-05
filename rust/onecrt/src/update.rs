@@ -4,21 +4,35 @@
 //! per-user Inno 安装包）；其它平台仍然只给下载页。
 
 use std::cmp::Ordering;
+use std::io::{Read, Write};
 use std::path::{Path, PathBuf};
-use std::time::Duration;
+use std::sync::atomic::{AtomicBool, Ordering as AtomicOrdering};
+use std::time::{Duration, Instant};
 
 use serde::Deserialize;
+
+use onecrt_core::settings;
 
 /// 不能用 `/releases/latest`：它按「最近一次公开」挑，补发一个旧版本的 draft 就会顶掉最新版，
 /// 界面于是看到的版本比当前还旧。这里拉列表自己取版本号最大的正式版。
 const ENDPOINT: &str = "https://api.github.com/repos/SpringHgui/onecrt/releases?per_page=100";
 const USER_AGENT: &str = concat!("onecrt/", env!("CARGO_PKG_VERSION"));
 
+#[derive(Clone)]
 pub struct Latest {
     pub version: String,
     pub url: String,
     /// 当前平台安装包的直链；发布页里没有对应资产时为空
     pub asset: Option<String>,
+}
+
+/// 下载中的一次进度上报。
+pub struct DownloadProgress {
+    pub downloaded: u64,
+    /// 服务端给的总字节数；没给就是 None，此时进度条只能显示已下载量
+    pub total: Option<u64>,
+    /// 最近一段时间的平均速度，字节/秒
+    pub bytes_per_sec: f64,
 }
 
 #[derive(Deserialize)]
@@ -72,7 +86,14 @@ pub fn can_auto_install() -> bool {
 }
 
 /// 下载当前版本的平台安装包到临时目录，返回落地路径。
-pub fn download(latest: &Latest) -> Result<PathBuf, String> {
+///
+/// 半截文件一直留在临时目录里（`.part` 后缀），中途失败、关掉窗口甚至重启应用后
+/// 再来都会带 `Range` 续传；只有整份下完才改名成正式文件名。
+pub fn download(
+    latest: &Latest,
+    cancel: &AtomicBool,
+    report: impl Fn(DownloadProgress),
+) -> Result<PathBuf, String> {
     let url = latest
         .asset
         .as_deref()
@@ -81,21 +102,149 @@ pub fn download(latest: &Latest) -> Result<PathBuf, String> {
     let dir = std::env::temp_dir().join("onecrt-update");
     std::fs::create_dir_all(&dir).map_err(|e| format!("建临时目录失败：{e}"))?;
     let dest = dir.join(name);
+    // 同名安装包之前已经整份下完（可能只是装到一半失败），直接复用
+    if std::fs::metadata(&dest)
+        .map(|m| m.len() > 0)
+        .unwrap_or(false)
+    {
+        return Ok(dest);
+    }
+    let partial = dest.with_extension("part");
+    let mut offset = std::fs::metadata(&partial).map(|m| m.len()).unwrap_or(0);
 
-    let mut response = agent()
-        .get(url)
-        .header("User-Agent", USER_AGENT)
-        .call()
-        .map_err(|e| format!("下载失败：{e}"))?;
-    let mut file = std::fs::File::create(&dest).map_err(|e| format!("写临时文件失败：{e}"))?;
+    let agent = download_agent();
+    let mut response = fetch(&agent, url, offset).map_err(|e| format!("下载失败：{e}"))?;
+    let mut status = response.status().as_u16();
+    if status == 416 {
+        // 服务端说这个起点已经到头了，说明残留的半截文件对不上，只能整份重下
+        offset = 0;
+        response = fetch(&agent, url, 0).map_err(|e| format!("下载失败：{e}"))?;
+        status = response.status().as_u16();
+    }
+    if status != 200 && status != 206 {
+        return Err(format!("下载失败：HTTP {status}"));
+    }
+    // 200 表示服务端没按 Range 给，只能从头写
+    if status == 200 {
+        offset = 0;
+    }
+    let total = if status == 206 {
+        content_range_total(&response)
+    } else {
+        header_u64(&response, "content-length")
+    };
+
+    if offset == 0 {
+        // append 模式不会截断，重下前先把旧文件清掉
+        let _ = std::fs::remove_file(&partial);
+    }
+    let mut file = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(&partial)
+        .map_err(|e| format!("写临时文件失败：{e}"))?;
+
     // 安装包十几 MB，默认 10MB 上限不够
     let mut reader = response
         .body_mut()
         .with_config()
         .limit(256 * 1024 * 1024)
         .reader();
-    std::io::copy(&mut reader, &mut file).map_err(|e| format!("下载失败：{e}"))?;
+    let mut buf = vec![0u8; 64 * 1024];
+    let mut downloaded = offset;
+    let mut speed = 0.0;
+    let mut window_start = Instant::now();
+    let mut window_bytes = downloaded;
+    report(DownloadProgress {
+        downloaded,
+        total,
+        bytes_per_sec: speed,
+    });
+    loop {
+        if cancel.load(AtomicOrdering::Relaxed) {
+            return Err("下载已取消".to_string());
+        }
+        let read = reader
+            .read(&mut buf)
+            .map_err(|e| format!("下载失败：{e}"))?;
+        if read == 0 {
+            break;
+        }
+        file.write_all(&buf[..read])
+            .map_err(|e| format!("写临时文件失败：{e}"))?;
+        downloaded += read as u64;
+        let elapsed = window_start.elapsed();
+        if elapsed >= Duration::from_millis(500) {
+            let instant = (downloaded - window_bytes) as f64 / elapsed.as_secs_f64();
+            // 半秒窗口的瞬时值抖得厉害，拿旧值压一压
+            speed = if speed == 0.0 {
+                instant
+            } else {
+                speed * 0.5 + instant * 0.5
+            };
+            report(DownloadProgress {
+                downloaded,
+                total,
+                bytes_per_sec: speed,
+            });
+            window_start = Instant::now();
+            window_bytes = downloaded;
+        }
+    }
+    let _ = file.flush();
+    drop(file);
+
+    // 少给字节就别拿去装：续传接错位置时这是唯一能发现的判据
+    if let Some(total) = total {
+        if downloaded != total {
+            return Err(format!("下载不完整：{downloaded} / {total} 字节"));
+        }
+    }
+
+    if dest.exists() {
+        let _ = std::fs::remove_file(&dest);
+    }
+    std::fs::rename(&partial, &dest).map_err(|e| format!("保存安装包失败：{e}"))?;
+    report(DownloadProgress {
+        downloaded,
+        total,
+        bytes_per_sec: speed,
+    });
     Ok(dest)
+}
+
+/// 拿响应头而不是让 ureq 把 4xx 变成错误：416 要靠状态码判断续传起点是否失效。
+fn fetch(
+    agent: &ureq::Agent,
+    url: &str,
+    offset: u64,
+) -> Result<ureq::http::Response<ureq::Body>, ureq::Error> {
+    let mut request = agent.get(url).header("User-Agent", USER_AGENT);
+    if offset > 0 {
+        request = request.header("Range", format!("bytes={offset}-"));
+    }
+    request.config().http_status_as_error(false).build().call()
+}
+
+fn header_u64(response: &ureq::http::Response<ureq::Body>, name: &str) -> Option<u64> {
+    response
+        .headers()
+        .get(name)?
+        .to_str()
+        .ok()?
+        .trim()
+        .parse()
+        .ok()
+}
+
+/// `Content-Range: bytes 100-999/1000` 里的总长度。
+fn content_range_total(response: &ureq::http::Response<ureq::Body>) -> Option<u64> {
+    let value = response.headers().get("content-range")?.to_str().ok()?;
+    parse_content_range_total(value)
+}
+
+fn parse_content_range_total(value: &str) -> Option<u64> {
+    value.rsplit('/').next()?.trim().parse().ok()
 }
 
 /// 拉起安装程序：先等本进程退出（安装包要覆盖正在运行的文件），再静默安装，最后启动新版本。
@@ -127,10 +276,60 @@ pub fn install(_setup: &Path) -> Result<(), String> {
 }
 
 fn agent() -> ureq::Agent {
-    ureq::Agent::config_builder()
-        .timeout_global(Some(Duration::from_secs(120)))
-        .build()
-        .into()
+    build_agent(Some(Duration::from_secs(120)))
+}
+
+/// 下载不设总时长：十几 MB 在慢代理下可能要跑几分钟，总时长会把正常下载拦腰截断。
+/// 改成按“多久没收到数据”判挂，连接和单次读取各留上限。
+fn download_agent() -> ureq::Agent {
+    build_agent(None)
+}
+
+fn build_agent(global: Option<Duration>) -> ureq::Agent {
+    let mut config = ureq::Agent::config_builder()
+        .timeout_connect(Some(Duration::from_secs(15)))
+        .timeout_per_read(Some(Duration::from_secs(30)))
+        .timeout_global(global);
+    let prefs = settings::load();
+    match proxy_choice(&prefs.proxy_mode, &prefs.proxy) {
+        ProxyChoice::Direct => config = config.proxy(None),
+        // 不进这个分支就沿用 ureq 默认的取法（环境变量，Windows 上还有 Internet 选项）
+        ProxyChoice::System => {}
+        ProxyChoice::Custom(proxy) => config = config.proxy(Some(proxy)),
+    }
+    config.build().into()
+}
+
+/// 设置里的三种方式落到 ureq 代理配置上。自定义地址写坏了就退回系统，跟旧版一致。
+fn proxy_choice(mode: &str, url: &str) -> ProxyChoice {
+    match mode {
+        settings::PROXY_DIRECT => ProxyChoice::Direct,
+        settings::PROXY_CUSTOM => match proxy_from(url) {
+            Some(proxy) => ProxyChoice::Custom(proxy),
+            None => ProxyChoice::System,
+        },
+        _ => ProxyChoice::System,
+    }
+}
+
+enum ProxyChoice {
+    Direct,
+    System,
+    Custom(ureq::Proxy),
+}
+
+fn proxy_from(text: &str) -> Option<ureq::Proxy> {
+    let text = text.trim();
+    if text.is_empty() {
+        return None;
+    }
+    ureq::Proxy::new(text).ok()
+}
+
+/// 保存前先过一遍解析，别让一条写错的地址把更新请求全弄失败。空串表示跟随系统。
+pub fn proxy_is_valid(text: &str) -> bool {
+    let text = text.trim();
+    text.is_empty() || ureq::Proxy::new(text).is_ok()
 }
 
 /// 当前平台安装包在发布页里的文件名后缀。
@@ -288,6 +487,55 @@ mod tests {
         ];
         assert_eq!(newest(&list).unwrap().0, "0.4.0");
         assert!(newest(&[]).is_none());
+    }
+
+    #[test]
+    fn reads_total_length_from_content_range() {
+        assert_eq!(
+            super::parse_content_range_total("bytes 1000-1999/2000"),
+            Some(2000)
+        );
+        assert_eq!(super::parse_content_range_total("bytes 0-0/123"), Some(123));
+        assert_eq!(super::parse_content_range_total("bytes 0-9/*"), None);
+        assert_eq!(super::parse_content_range_total("garbage"), None);
+    }
+
+    #[test]
+    fn validates_proxy_urls() {
+        assert!(super::proxy_is_valid(""));
+        assert!(super::proxy_is_valid("   "));
+        assert!(super::proxy_is_valid("http://127.0.0.1:7890"));
+        // 不带协议的 host:port 也认（ureq 默认按 http 处理）
+        assert!(super::proxy_is_valid("127.0.0.1:7890"));
+        assert!(super::proxy_is_valid("socks5://127.0.0.1:1080"));
+        assert!(!super::proxy_is_valid("http://"));
+        assert!(super::proxy_from("  ").is_none());
+    }
+
+    #[test]
+    fn proxy_choice_follows_mode() {
+        use super::{proxy_choice, ProxyChoice};
+        use onecrt_core::settings::{PROXY_CUSTOM, PROXY_DIRECT, PROXY_SYSTEM};
+
+        let url = "http://127.0.0.1:7890";
+        assert!(matches!(
+            proxy_choice(PROXY_DIRECT, url),
+            ProxyChoice::Direct
+        ));
+        assert!(matches!(
+            proxy_choice(PROXY_SYSTEM, url),
+            ProxyChoice::System
+        ));
+        assert!(matches!(
+            proxy_choice(PROXY_CUSTOM, url),
+            ProxyChoice::Custom(_)
+        ));
+        // 自定义方式却没有可用地址时退回系统，别直接断网
+        assert!(matches!(
+            proxy_choice(PROXY_CUSTOM, "  "),
+            ProxyChoice::System
+        ));
+        assert!(matches!(proxy_choice("bogus", url), ProxyChoice::System));
     }
 
     #[test]
