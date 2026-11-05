@@ -303,6 +303,11 @@ jobs:
     needs: [meta, build-windows, build-linux, build-macos]
     runs-on: ubuntu-latest
     steps:
+      # 更新说明要按「上个 tag..本 tag」的提交生成，必须带全量 tag 历史
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
       - name: 下载构建产物
         uses: actions/download-artifact@v4
         with:
@@ -316,21 +321,87 @@ jobs:
           sha256sum onecrt-* > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
+      # GitHub 自带的 generate_release_notes 只认 PR，本仓库直接往分支推提交，生成的说明是空的。
+      # 这里按 conventional commit 前缀把提交分到「新功能/修复/界面/…」下；
+      # 想写更细的说明，就在 docs/release-notes/<tag>.md 放一份，原样替代自动生成的部分。
+      - name: 生成更新说明
+        env:
+          TAG: ${{ github.ref_name }}
+          VERSION: ${{ needs.meta.outputs.version }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+
+          prev="$(git tag --sort=-v:refname | grep -vx "$TAG" | head -n1 || true)"
+          range="${prev:+$prev..}$TAG"
+          curated="docs/release-notes/$TAG.md"
+
+          {
+            echo "OneCRT $VERSION（纯 Rust / gpui 重写版）"
+            echo
+            echo "## 本次更新"
+            echo
+            if [ -f "$curated" ]; then
+              cat "$curated"
+              echo
+            else
+              # 正则放变量里：新版 bash 直接写在 =~ 右边会把括号当成语法
+              re="^([a-z]+)(\([^)]*\))?!?:[[:space:]]*(.+)$"
+              tmp="$(mktemp -d)"
+              git log --no-merges --format='%s' "$range" | while IFS= read -r subject; do
+                case "$subject" in
+                  "chore(release):"*) continue ;;
+                esac
+                if [[ "$subject" =~ $re ]]; then
+                  type="${BASH_REMATCH[1]}"
+                  text="${BASH_REMATCH[3]}"
+                else
+                  type=""
+                  text="$subject"
+                fi
+                case "$type" in
+                  feat) section="新功能" ;;
+                  fix) section="修复" ;;
+                  style|ui) section="界面" ;;
+                  perf) section="性能" ;;
+                  refactor) section="重构" ;;
+                  *) section="其它" ;;
+                esac
+                printf -- '- %s\n' "$text" >> "$tmp/$section"
+              done
+              for section in 新功能 修复 界面 性能 重构 其它; do
+                if [ -s "$tmp/$section" ]; then
+                  echo "### $section"
+                  echo
+                  cat "$tmp/$section"
+                  echo
+                fi
+              done
+              rm -rf "$tmp"
+            fi
+
+            echo "## 安装包"
+            echo
+            echo "| 平台 | 文件 | 说明 |"
+            echo "| --- | --- | --- |"
+            echo "| Windows x64 | \`onecrt-$VERSION-windows-x64-setup.exe\` | Inno Setup 安装包 |"
+            echo "| Linux x64 | \`onecrt-$VERSION-linux-x64.deb\` | Debian 包，\`sudo dpkg -i\` 安装 |"
+            echo "| macOS arm64 | \`onecrt-$VERSION-macos-arm64.dmg\` | 双击挂载拖入 Applications |"
+            echo
+            echo "未做代码签名（首启有 SmartScreen / Gatekeeper 提示）。"
+            echo "应用内「关于 → 检查更新」在 Windows 上会下载安装包并静默升级（支持断点续传），其它平台只提示到本页下载。"
+            if [ -n "$prev" ]; then
+              echo
+              echo "**完整变更**：https://github.com/$REPO/compare/$prev...$TAG"
+            fi
+          } > release-notes.md
+
+          cat release-notes.md
+
       - name: 发布
         uses: softprops/action-gh-release@v2
         with:
           tag_name: ${{ github.ref_name }}
           name: OneCRT ${{ needs.meta.outputs.version }}
-          body: |
-            OneCRT ${{ needs.meta.outputs.version }}（纯 Rust / gpui 重写版）三平台安装包：
-
-            | 平台 | 文件 | 说明 |
-            | --- | --- | --- |
-            | Windows x64 | `onecrt-${{ needs.meta.outputs.version }}-windows-x64-setup.exe` | Inno Setup 安装包 |
-            | Linux x64 | `onecrt-${{ needs.meta.outputs.version }}-linux-x64.deb` | Debian 包，`sudo dpkg -i` 安装 |
-            | macOS arm64 | `onecrt-${{ needs.meta.outputs.version }}-macos-arm64.dmg` | 双击挂载拖入 Applications |
-
-            未做代码签名（首启有 SmartScreen / Gatekeeper 提示）。
-            应用内「关于 → 检查更新」在 Windows 上会下载安装包并静默升级（支持断点续传），其它平台只提示到本页下载。
-          generate_release_notes: true
+          body_path: release-notes.md
           files: artifacts/*
